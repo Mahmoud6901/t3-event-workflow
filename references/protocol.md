@@ -1,0 +1,126 @@
+# Protocol
+
+Every workflow call prints one JSON object: `{"ok": true, ...}`, or `{"ok": false, "error": "..."}`
+with a reason you can act on.
+
+- **The orchestrator** runs `t3-workflow '<JSON>'` from its shell. Its hook adds the project and thread
+  and runs [harness.py](../scripts/harness.py).
+- **A worker** runs the commands its brief gives, with its own `--worker` id and `--token`.
+
+## Orchestrator operations
+
+| Operation | Example | Result |
+|---|---|---|
+| next | `{"op":"next"}` | `calls`, `tell`, `ask` |
+| done | `{"op":"done","results":[{"call":"w1-start","taskId":"…","childThreadId":"…"}]}` | `recorded` |
+| queue_set | `{"op":"queue_set","plans":[{"plan":"M30","owns":["src/login/"],"dependsOn":[],"tasks":[{"task":"Fix the login typo","brief":"…"},{"task":"Add the login test","brief":"…","after":["Fix the login typo"]}]}]}` | `plans` |
+| queue_edit | `{"op":"queue_edit","plan":"M30","tasks":[{"task":"…","brief":"…"}]}`, `{"op":"queue_edit","plans":[…]}`, `{"op":"queue_edit","drop":"Fix the login typo"}` | `plans`, `tasks`, `dropped` |
+| answer | `{"op":"answer","ask":"a7","answer":"merge"}` | `task`, `state` |
+| restart | `{"op":"restart","task":"Fix the login typo","authorization":"<the user's words>"}` | `task`, `state` |
+| control | `{"op":"control","action":"activate","authorization":"<the user's words>"}` | `control` |
+| status | `{"op":"status"}` | plans, tasks, each role's model, working workers, open asks, problems |
+| setup_github | `{"op":"setup_github","authorization":"<the user's words>"}` | `repo`, `changed` |
+| models | `{"op":"models","search":"qwen"}` | `models`, each with `thinking`, or a `reason` |
+| pick | `{"op":"pick","role":"reviewer","model":"…","authorization":"<the user's words>"}` | `model`, `effort`, `source` |
+| devops | `{"op":"devops","on":false,"authorization":"<the user's words>"}` | `devops`, `keep` |
+
+- **next** returns:
+  - `calls`: each one has `call` (its id), `worker`, `tool` (`delegate_task`, `t3_thread_send` or
+    `task_cancel`) and `arguments`. Make them in order, with exactly those arguments. Each carries a
+    `clientRequestId`, so making a call again is safe.
+  - `tell`: lines for the user.
+  - `ask`: questions for the user, each with an `id`, a `question` and, if it has them, `options`.
+
+  A call stays in `calls` until `done` records it.
+- **done** records what T3 returned:
+  - `delegate_task`: its `taskId` and `childThreadId`.
+  - `t3_thread_send`: the new `taskId`.
+  - `task_cancel`: the call alone.
+
+  Record every call you made in one `done`. Leave out a call that failed, and tell the user why.
+- **queue_set** starts a queue when none is running. Rules for its tasks:
+  - `owns` lists the paths a plan's tasks may change; a task can narrow it with its own `owns`.
+  - Tasks without `after` start together, in parallel, with no cap.
+  - A task waits for the tasks named in its `after` to merge, and a plan waits for each plan in its
+    `dependsOn` to finish.
+- **queue_edit** changes a running queue: it adds plans, adds tasks to a plan (a finished plan opens
+  again), or drops a task. Dropping leaves the task's PR open on GitHub. DevOps must finish a task it
+  is merging before that task can be dropped.
+- **answer** answers an `ask`:
+  - A PR that changes files outside its task's paths takes `merge`, `back` (to its implementer) or
+    `drop`.
+  - A stuck implementer's question takes the user's own words, which are sent to it.
+- **restart** replaces the worker that holds a task (an implementer, reviewer or DevOps) with a new one
+  in the same role. Use it only on the user's word.
+- **control**: `activate`, `pause`, `resume` or `stop`. All but `pause` need the user's own words.
+  Workers start only while the binding is active. Running workers finish their current step.
+- **status** is a read; it changes nothing.
+- **setup_github** sets the repo to squash-only merges, branch deletion on merge, update-branch on and
+  auto-merge off. It protects the branch with a required PR (0 approvals), the CI checks plus
+  `t3/review` on an up-to-date branch, admins included, and no force-push or deletion. It changes
+  only what differs, and needs the user's own words.
+- **pick** sets a role's model from `models`, with `effort` (low to max) only if it has `thinking`.
+  `"model":"default"` goes back. Running workers keep theirs.
+- **devops** turns DevOps on or off for plans that start later; `keep` lists running plans that stay as
+  they are. Off, `next` merges each confirmed PR itself, one at a time, with DevOps's update and merge
+  checks; the watcher wakes you when CI finishes. Every CI failure goes to the implementer.
+
+The hook also runs `ended` for each "Delegated task …" notice. You never run it yourself.
+
+## Task states
+
+| State | Meaning | What moves it |
+|---|---|---|
+| `waiting` | Its `after` tasks or `dependsOn` plans are not merged | `next` starts an implementer |
+| `implementing` | Its implementer works, or fixes what a follow-up names | `worker pr`, `worker stuck` |
+| `review_needed` | A PR commit waits for review | `next` starts a reviewer |
+| `reviewing` | A reviewer reads it | `worker review` |
+| `approved` | `t3/review` is on the reviewed commit | `next` applies the rule below |
+| `asking` | The PR changes files outside its paths | Your `answer` |
+| `ci_failed` | CI failed on the approved commit | DevOps triages it |
+| `confirmed` | Ready to merge | `worker take` |
+| `merging` | DevOps holds it (or `next`, without DevOps) | `worker merge`, `worker failed`, `worker update` |
+| `pipeline_wait` | Waits for DevOps's pipeline fix to merge | That fix's merge |
+| `blocked` | A question for the user, or its worker ended twice without reporting | `answer`, `restart`, or a drop |
+| `merged`, `dropped` | Finished | |
+
+**The confirmation rule**, which `next` applies to each approved task:
+- If the PR's head is not the reviewed commit, the task goes back to its implementer.
+- If the PR changes files outside the task's paths, the task waits for your answer.
+- If a required check failed, the task goes to `ci_failed`.
+- Otherwise the task is `confirmed`.
+
+A review asking for changes, a conflict, a failed CI check in the task's code, or your `back` sends
+the task to `implementing`. `next` then sends a follow-up to the same implementer naming the fix.
+Its next `worker pr` sends the task to review again.
+
+**A worker that ends without its closing command** gets one follow-up asking it to finish. If it ends
+that way again, its task is `blocked`, and `tell` says so.
+
+## Worker commands
+
+```text
+<python> <install>/scripts/harness.py worker <command> --worker <id> --token <token> [arguments]
+```
+
+| Worker | Command | What it does |
+|---|---|---|
+| Implementer | `worker pr --pr N` | Checks that PR N is open against the branch and that this checkout is clean and at its head. Then it runs the project's checks here. A failed check refuses, with the output. On success the task goes to review. |
+| Implementer | `worker stuck --why "…"` | Blocks the task with a question for the user |
+| Reviewer | `worker review --verdict approve\|changes --sha S` | `approve` posts `t3/review` on S, which must still be the PR's head. `changes` sends the task back to its implementer. |
+| DevOps | `worker take` | Gives the oldest confirmed or CI-failed task of its plan, or nothing while another merge runs |
+| DevOps | `worker update` | Brings the PR up to date through GitHub. If the task's own change is unchanged, the approval carries to the new head. If it changed or conflicts, the task goes back to its implementer. |
+| DevOps | `worker merge` | Requires the approved head, every required check and `t3/review` to be green. Then it squash-merges with GitHub's head guard and fast-forwards the project folder when that folder is on the branch. |
+| DevOps | `worker failed --cause task\|pipeline --detail "…"` | `task` sends the failure to the implementer. `pipeline` holds the task until DevOps's own fix merges. |
+| DevOps | `worker pipeline --pr N` | Registers DevOps's pipeline-fix PR as a task, which a reviewer then reads |
+
+A refused command changes nothing. Its error says what to do.
+
+## The binding
+
+`init` creates a binding, paused; [setup](setup.md#3-bind-it) lists its fields.
+
+Jev picks the model and effort of each implementer and reviewer without a pick. When it gives no answer, the defaults apply, and `status` shows a `jev` problem after three failures in a row.
+
+**Problems:** `status` lists any background part (watcher scan, its sends, hooks, Jev, GitHub, a
+checkout) that failed three times in a row. A part's next success clears it.

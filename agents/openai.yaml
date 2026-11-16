@@ -1,0 +1,4 @@
+interface:
+  display_name: "T3 Event Workflow"
+  short_description: "One orchestrator; background workers deliver each task as a reviewed, merged PR"
+  default_prompt: "Use $t3-event-workflow to set up this project: one orchestrator session, with workers as delegated tasks."

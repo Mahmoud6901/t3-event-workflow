@@ -1,0 +1,31 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unittest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python: ["3.13"]
+        include:
+          - os: ubuntu-latest
+            python: "3.11"  # The oldest Python pyproject.toml accepts.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Git identity for the test repositories
+        run: |
+          git config --global user.email "tests@example.com"
+          git config --global user.name "tests"
+          git config --global init.defaultBranch main
+      - name: Unit tests
+        working-directory: scripts
+        run: python -m unittest discover -p "test_*.py" -v

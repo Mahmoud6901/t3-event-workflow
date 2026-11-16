@@ -1,0 +1,116 @@
+{
+  "projectId": "your-t3-project-id",
+  "orchestrator": "orchestrator-thread-id",
+  "workspace": "/absolute/project/path",
+  "branch": "main",
+  "github": {
+    "repo": "owner/name",
+    "requiredChecks": [
+      "acceptance"
+    ]
+  },
+  "checks": [
+    {
+      "name": "tests",
+      "argv": [
+        "npm",
+        "test"
+      ],
+      "cwd": ".",
+      "timeoutSeconds": 900
+    }
+  ],
+  "defaults": {
+    "implementer": "gpt-6.1-sol",
+    "implementerEffort": "high",
+    "reviewer": "claude-sonnet-5-5",
+    "reviewerEffort": "high",
+    "devops": "claude-opus-5-5",
+    "devopsEffort": "xhigh"
+  },
+  "models": {
+    "claude-haiku-5-5": {
+      "provider": "claudeAgent",
+      "tier": 1,
+      "roles": [
+        "implementer",
+        "reviewer"
+      ]
+    },
+    "gpt-6-luna": {
+      "provider": "codex",
+      "tier": 1,
+      "roles": [
+        "implementer",
+        "reviewer"
+      ]
+    },
+    "gpt-6.1-sol": {
+      "provider": "codex",
+      "tier": 2,
+      "roles": [
+        "implementer"
+      ]
+    },
+    "claude-sonnet-5-5": {
+      "provider": "claudeAgent",
+      "tier": 2,
+      "roles": [
+        "reviewer"
+      ]
+    },
+    "gpt-6-astra": {
+      "provider": "codex",
+      "tier": 3,
+      "roles": [
+        "implementer"
+      ]
+    },
+    "claude-opus-5-5": {
+      "provider": "claudeAgent",
+      "tier": 3,
+      "roles": [
+        "reviewer",
+        "devops"
+      ]
+    },
+    "deepseek/deepseek-v4.1-flash": {
+      "provider": "acpRegistry_goose",
+      "tier": 1,
+      "roles": [
+        "implementer",
+        "reviewer"
+      ]
+    },
+    "google/gemini-4-argon": {
+      "provider": "acpRegistry_goose",
+      "tier": 1,
+      "roles": [
+        "implementer",
+        "reviewer"
+      ]
+    },
+    "qwen/qwen3.8-flash": {
+      "provider": "acpRegistry_goose",
+      "tier": 1,
+      "roles": [
+        "implementer",
+        "reviewer"
+      ]
+    },
+    "moonshotai/kimi-k3.1-pro": {
+      "provider": "acpRegistry_goose",
+      "tier": 1,
+      "roles": [
+        "implementer",
+        "reviewer"
+      ]
+    }
+  },
+  "jev": {
+    "model": "jev-1.13.0",
+    "keyEnv": "TYPESAFE_API_KEY",
+    "keyFile": "secrets/typesafe-api-key.txt"
+  },
+  "quietMinutes": 30
+}

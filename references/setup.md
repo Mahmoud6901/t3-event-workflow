@@ -1,0 +1,155 @@
+# Setting up a project
+
+Setup makes a Claude or Codex session in a T3 project that project's orchestrator. It runs on the
+user's message asking for it with "use t3 workflow". It creates no other session: workers start
+later, as delegated tasks. Requirements:
+- the project is hosted on GitHub
+- this computer has the workflow installed (see the README in the parent folder)
+- `gh` is signed in with an account that can push to the repo and change its settings
+
+## 1. Gather the facts
+
+Until the binding exists, your hook does not guard this session. Read and ask; change nothing.
+
+- **The T3 project id and this thread's id:** from T3's own tools. Never guess them.
+- **The project folder:** the absolute path of the T3 project's checkout.
+- **The repo:** `git remote get-url origin` must point to GitHub; take `owner/name` from it. If there
+  is no GitHub remote, stop and tell the user the workflow needs one.
+- **The branch tasks merge into:** the repo's default branch
+  (`gh repo view <owner/name> --json defaultBranchRef`).
+- **`requiredChecks`:** the CI checks that run on pull requests to that branch, named as GitHub shows
+  them (`gh pr checks` on a recent PR, or the job names in `.github/workflows/`). If there is no CI
+  yet, see [no CI yet](#no-ci-yet).
+- **`checks`:** the local checks `worker pr` runs in each implementer's checkout before review. Take
+  them from the project's instructions or package scripts, and give each `argv` as a list. Do not run
+  them now. If none apply, write `noChecksReason` instead, saying why.
+
+## 2. Ask about models and DevOps
+
+Each role runs on its default model unless the user picks an OpenRouter model for it. Run `models`
+the way step 3 runs `init`, with the ids from step 1:
+
+```json
+{"op":"models","projectId":"<T3 project id>","threadId":"<this thread's id>","search":"<words>"}
+```
+
+- If `goose` is false, tell the user its `reason` and go on: every role keeps its default.
+- Otherwise ask, for the implementer, the reviewer and DevOps in turn, for a model or a skip. Search
+  with the user's words and show the matches; `more` counts the ones not shown. Offer only a model the
+  list returned.
+- Ask for an effort (low, medium, high or max) only when the chosen model has `"thinking": true`.
+- A picked role always runs on its pick. A skipped role keeps its default, and Jev may advise another
+  model for an implementer or reviewer.
+
+Add the picks to `init` as `"picks":{"reviewer":{"model":"<model>","effort":"high"}}`, or as
+`"reviewer":"<model>"` when no effort was asked.
+
+Then ask whether a DevOps worker merges the PRs (the default), or the harness, with no model. For the
+harness, add `"devops":false` to `init`. Without DevOps, the harness brings each confirmed PR up to
+date with the branch, waits for CI and merges it. Every CI failure goes back to the implementer, which
+asks the user when CI itself is broken. DevOps also fixes the pipeline; the harness does not.
+
+## 3. Bind it
+
+Run the harness directly; the `t3-workflow` form works only once this thread is the orchestrator.
+`<install>` is this workflow's folder, the parent of the folder this file is in.
+
+```bash
+python "<install>/scripts/harness.py" <<'EOF'
+{"op":"init","projectId":"<T3 project id>","threadId":"<this thread's id>","workspace":"<project folder>","repo":"owner/name","branch":"main","requiredChecks":["<CI check>"],"checks":[{"name":"tests","argv":["npm","test"],"cwd":".","timeoutSeconds":900}]}
+EOF
+```
+
+In Codex's PowerShell, pipe a here-string instead, and keep the JSON ASCII (write other characters as
+`\uXXXX`):
+
+```powershell
+@'
+{"op":"init", ...the same fields...}
+'@ | python "<install>/scripts/harness.py"
+```
+
+`init`'s fields:
+
+| Field | Meaning |
+|---|---|
+| `projectId`, `threadId` | The T3 project and the orchestrator's thread |
+| `workspace` | The project folder, absolute |
+| `repo` | The GitHub repo, `owner/name` |
+| `branch` | The branch tasks merge into (default `main`) |
+| `requiredChecks` | The CI check names that must pass before a merge |
+| `checks` | Local checks `worker pr` runs, each `{"name","argv","cwd","timeoutSeconds"}`. Give `argv` as a list, not shell text; `cwd` is relative to the project folder. |
+| `noChecksReason` | Why there are no local checks, when `checks` is empty |
+| `defaults` | Models and efforts without a pick or Jev's answer: implementer GPT-6.1-Sol at high, reviewer Sonnet 5.5 at high, DevOps Opus 5.5 at `xhigh` |
+| `quietMinutes` | Minutes before the watcher reports a quiet worker (default 30) |
+| `picks` | The user's OpenRouter model per role, from step 2 |
+| `devops` | `false` merges without a DevOps worker (default `true`), from step 2 |
+
+The binding starts paused. If it says the project is already bound, point the user to its orchestrator
+thread and stop. From now on, your hook guards this thread as the orchestrator: in a workflow turn,
+you can only read, use T3's tools, and run `t3-workflow`. On Codex, read with Get-Content,
+Get-ChildItem, rg or Select-String, one plain command without pipes or redirection.
+
+## 4. Protect the branch
+
+Tell the user what `setup_github` changes (see the [protocol](protocol.md)) and run it with their own
+words as `authorization`. Its result lists what it changed; running it again changes nothing. If
+GitHub refuses branch protection, the repo is private on a plan without it: tell the user.
+
+## 5. Report
+
+Tell the user:
+- the binding: the repo, the branch, and both kinds of checks
+- what `setup_github` changed
+- the model each role starts on, and that they can change one later with "use t3 workflow: use
+  <model> for the reviewer", or go back with "use t3 workflow: back to default for the reviewer"
+- whether DevOps merges, and that "use t3 workflow: turn DevOps off" (or on) changes it for plans that
+  start later
+- that the binding is paused, and work starts once they say to activate it
+- that they choose this thread's model and effort in T3, and can change them at any time. Any Claude
+  or Codex model works: T3 keeps the thread's id when it moves between them, and the binding and its
+  tasks live in the harness, not in the thread.
+- that before a Codex model runs this thread, they trust the workflow's hooks once: run `codex`, type
+  `/hooks` and trust the three `t3-workflow hook` hooks. Without that, Codex skips them, and `t3-workflow`
+  does not run.
+
+Never ask the user to switch your model.
+
+On their words, run `control` with `activate` and their words as `authorization`, then plan with them
+as [orchestrator.md](orchestrator.md) says.
+
+## No CI yet
+
+Make CI the first plan: one task that adds the pull-request workflow, owning `.github/workflows/`. Its
+job name must match `requiredChecks`, because the check first reports on that task's own PR. The same
+task adds the standby deploy workflow below.
+
+## CD on standby
+
+Deployment waits until the user names a server. Until then, `deploy.yml` runs on pushes to the main
+branch and skips itself until the repo variable `DEPLOY_TARGET` is set. Its one step fails, so setting
+the variable early never looks like a deploy:
+
+```yaml
+name: deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    if: vars.DEPLOY_TARGET != ''
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No deploy steps yet; they are written once the server is named." && exit 1
+```
+
+## Moving from the old workflow
+
+- The first harness call after the upgrade moves every old binding aside, into the database's
+  `retired_bindings` table. It touches no thread.
+- Set each GitHub project up again from the thread that should be its orchestrator. The old
+  orchestrator thread is a good choice.
+- Archive the old coordinator, implementer, reviewer and decision-maker threads in T3.
+- The old `<project>-tracks` folders can go once their work is merged or dropped.
+
+A binding's settings are fixed at `init`, except the models the user picks, which `pick` changes.

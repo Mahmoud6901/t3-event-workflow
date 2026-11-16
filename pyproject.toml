@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "t3-event-workflow"
+version = "0.1.0"
+description = "Run a GitHub project in T3 Code through one orchestrator session, with workers and pull requests in the background."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = []  # Standard library only.
+
+[project.scripts]
+t3-workflow = "t3_workflow.install:main"
+
+# The repository itself is the package: installed, it keeps the same layout (install.py, scripts/, references/),
+# so every path the code computes from its own folder works the same in a clone and in an install.
+[tool.setuptools]
+package-dir = { "t3_workflow" = "." }
+packages = ["t3_workflow"]
+include-package-data = false
+
+[tool.setuptools.package-data]
+t3_workflow = ["SKILL.md", "README.md", "scripts/*.py", "references/*.md", "agents/*.yaml", "assets/*.json"]
+
+[tool.setuptools.exclude-package-data]
+t3_workflow = ["scripts/test_*.py"]
