@@ -22,6 +22,10 @@ GOOSE_LIST = [  # The shape of T3's ~/.t3/caches/acpRegistry_goose.json entries.
      "capabilities": {"optionDescriptors": [{"id": "provider"}, {"id": "mode"}, {"id": "thinking_effort"}]}},
     {"slug": "qwen/qwen3.8-max", "name": "qwen/qwen3.8-max", "capabilities": {"optionDescriptors": [{"id": "provider"}]}},
 ]
+CLAUDE_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [{"id": "effort"}]}}
+               for s in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")]
+CODEX_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [{"id": "reasoningEffort"}]}}
+              for s in ("gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra")]
 
 ORCH = "thread-orch"
 PROJECT = "proj-1"
@@ -136,12 +140,17 @@ class FlowTests(unittest.TestCase):
         self.hub = FakeHub(self.origin)
         self.jev_answer = {"implementer": "gpt-6.1-sol", "implementerEffort": "medium",
                            "reviewer": "claude-sonnet-5-5", "reviewerEffort": "high"}
+        self.caches = root / "t3-caches"  # T3's model lists; missing until a test writes them, so nothing is checked.
+        patcher = patch.object(flow, "T3_CACHES", self.caches)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def call(self, request):
         return harness.run(["--db", str(self.db)], json.dumps(request), hub=lambda repo: self.hub, jev=self.advise)
 
     def advise(self, config, context):
         self.jev_asked = getattr(self, "jev_asked", 0) + 1
+        self.jev_models = sorted(config["models"])
         return dict(self.jev_answer)
 
     def orchestrator(self, op, **fields):
@@ -174,34 +183,65 @@ class FlowTests(unittest.TestCase):
         self.assertEqual([c["call"] for c in again["calls"]], [call["call"]])
         self.assertEqual(again["calls"][0]["arguments"]["clientRequestId"], call["call"])
 
-    def goose_list(self, models=GOOSE_LIST, **top):
-        cache = Path(self.tmp.name) / "acpRegistry_goose.json"
-        cache.write_text(json.dumps({"enabled": True, "installed": True, "status": "ready", "models": models, **top}))
-        patcher = patch.object(flow, "GOOSE_CACHE", cache)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+    def t3_caches(self, goose=GOOSE_LIST, claude=CLAUDE_LIST, codex=CODEX_LIST, **goose_top):
+        """T3's provider caches as T3 writes them; None leaves that provider's out, as when it is not installed."""
+        self.caches.mkdir(exist_ok=True)
+        for provider, models, top in (("claudeAgent", claude, {}), ("codex", codex, {}), ("acpRegistry_goose", goose, goose_top)):
+            path = self.caches / f"{provider}.json"
+            if models is None:
+                path.unlink(missing_ok=True)
+                continue
+            path.write_text(json.dumps({"enabled": True, "installed": True, "status": "ready",
+                                        "auth": {"status": "authenticated"}, "models": models, **top}))
 
-    def test_setup_searches_t3s_goose_list_by_name_before_the_project_is_bound(self):
-        self.goose_list()
+    def test_setup_searches_every_model_t3_can_run_by_name_before_the_project_is_bound(self):
+        self.t3_caches()
         found = self.orchestrator("models", search="QWEN")
         self.assertTrue(found["ok"], found)
-        self.assertTrue(found["goose"])
-        self.assertEqual(found["models"], [{"model": "qwen/qwen3.8-flash", "thinking": False},
-                                           {"model": "qwen/qwen3.8-max", "thinking": False}])
+        self.assertEqual(found["models"], [{"model": "qwen/qwen3.8-flash", "provider": "goose", "effort": False},
+                                           {"model": "qwen/qwen3.8-max", "provider": "goose", "effort": False}])
         self.assertEqual(self.orchestrator("models", search="sonnet")["models"],
-                         [{"model": "anthropic/claude-sonnet-4", "thinking": True}])
+                         [{"model": "claude-sonnet-5-5", "provider": "Claude", "effort": True},
+                          {"model": "anthropic/claude-sonnet-4", "provider": "goose", "effort": True}])
+        self.assertEqual(found["providers"], {"Claude": "ready", "Codex": "ready", "goose": "ready"})
 
-    def test_without_a_usable_goose_setup_is_told_why_and_every_role_keeps_its_default(self):
-        with patch.object(flow, "GOOSE_CACHE", Path(self.tmp.name) / "missing.json"):
-            self.assertIn("not installed", self.orchestrator("models", search="qwen")["reason"])
-        self.goose_list(enabled=False)
-        self.assertIn("not enabled", self.orchestrator("models")["reason"])
-        self.goose_list(models=[])
-        empty = self.orchestrator("models")
-        self.assertEqual((empty["goose"], empty["reason"]), (False, "T3's goose list is empty. Every role keeps its default model."))
+    def test_setup_is_told_why_a_provider_cannot_run_and_without_t3_nothing_is_checked(self):
+        self.assertFalse(self.orchestrator("models")["known"])
+        self.t3_caches(goose=None)
+        self.assertIn("not installed", self.orchestrator("models")["providers"]["goose"])
+        self.t3_caches(enabled=False)
+        self.assertIn("not enabled", self.orchestrator("models")["providers"]["goose"])
+        self.t3_caches(goose=[])
+        self.assertEqual(self.orchestrator("models")["providers"]["goose"], "T3's goose list is empty")
+        self.t3_caches(auth={"status": "unauthenticated"})
+        self.assertIn("not signed in", self.orchestrator("models")["providers"]["goose"])
+
+    def test_without_codex_setup_needs_a_pick_for_the_implementer_and_it_runs_on_claude(self):
+        self.t3_caches(codex=None)
+        found = self.orchestrator("models")
+        self.assertEqual(found["defaults"]["implementer"], {"model": "gpt-6.1-sol", "effort": "high", "runs": False})
+        self.assertTrue(found["defaults"]["reviewer"]["runs"])
+        refused = self.orchestrator("init", workspace=str(self.workspace), repo=REPO, requiredChecks=["acceptance"], checks=[],
+                                    noChecksReason="Test project")
+        self.assertIn("T3 cannot run gpt-6.1-sol, the implementer's default", refused.get("error", ""))
+        self.bind(picks={"implementer": "claude-sonnet-5-5"})
+        self.assertFalse(self.orchestrator("pick", role="implementer", model="default", authorization="Back to default.")["ok"],
+                         "a default T3 could not run stays out of reach")
+        self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
+        (call,) = self.orchestrator("next")["calls"]
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "claudeAgent", "model": "claude-sonnet-5-5",
+                                                       "options": {"effort": "high"}})
+
+    def test_jev_advises_only_among_the_models_t3_can_run(self):
+        self.t3_caches(codex=None)
+        self.bind(picks={"implementer": "claude-haiku-5-5"})
+        self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
+        self.orchestrator("next")
+        self.assertTrue(self.jev_models)
+        self.assertFalse([m for m in self.jev_models if m.startswith("gpt-")], self.jev_models)
 
     def test_a_role_picked_at_setup_runs_on_that_model_whatever_jev_advises(self):
-        self.goose_list()
+        self.t3_caches()
         self.bind(picks={"implementer": {"model": "anthropic/claude-sonnet-4", "effort": "medium"},
                          "reviewer": {"model": "qwen/qwen3.8-flash"}})
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
@@ -210,22 +250,22 @@ class FlowTests(unittest.TestCase):
                                                        "options": {"provider": "openrouter", "thinking_effort": "medium"}})
 
     def test_jev_is_not_asked_when_every_role_it_advises_on_is_picked(self):
-        self.goose_list()
+        self.t3_caches()
         self.bind(picks={"implementer": "qwen/qwen3.8-flash", "reviewer": "qwen/qwen3.8-max"})
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         self.assertTrue(self.orchestrator("next")["calls"])
         self.assertEqual(getattr(self, "jev_asked", 0), 0)
 
     def test_a_pick_t3_does_not_list_is_refused_and_nothing_is_bound(self):
-        self.goose_list()
+        self.t3_caches()
         refused = self.orchestrator("init", workspace=str(self.workspace), repo=REPO, requiredChecks=["acceptance"], checks=[],
                                     noChecksReason="Test project", picks={"reviewer": "made-up/model"})
         self.assertFalse(refused["ok"])
-        self.assertIn("made-up/model is not in T3's goose list", refused["error"])
+        self.assertIn("T3 cannot run made-up/model", refused["error"])
         self.assertFalse(self.orchestrator("status")["ok"], "the refused setup bound nothing")
 
     def test_the_user_changes_a_roles_model_later_and_a_started_worker_keeps_its_own(self):
-        self.goose_list()
+        self.t3_caches()
         self.bind()
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         self.orchestrator("next")

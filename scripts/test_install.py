@@ -179,6 +179,17 @@ class InstallTests(unittest.TestCase):
         with patch.object(install.shutil, "which", which):
             self.assertEqual(install.requirements(), ["`gh` is not on PATH."])
 
+    def test_the_orchestrator_needs_claude_or_codex_not_both(self):
+        signed_in = install.subprocess.CompletedProcess(["gh"], 0)
+        for missing in (("claude",), ("codex",), ("claude", "codex")):
+            with patch.object(install.shutil, "which", lambda tool, m=missing: None if tool in m else f"/bin/{tool}"), \
+                    patch.object(install.subprocess, "run", return_value=signed_in):
+                problems = install.requirements()
+            if len(missing) == 1:
+                self.assertEqual(problems, [], missing)
+            else:
+                self.assertEqual(problems, ["Neither `claude` nor `codex` is on PATH: the orchestrator runs on one of them."])
+
 
 if __name__ == "__main__":
     unittest.main()

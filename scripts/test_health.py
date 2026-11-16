@@ -8,6 +8,7 @@ import unittest
 import json
 from unittest.mock import MagicMock, patch
 
+import flow
 import harness
 import health
 import t3_hooks
@@ -74,6 +75,9 @@ class PartsReportTests(unittest.TestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.state = Path(folder.name)
+        patcher = patch.object(flow, "T3_CACHES", self.state / "no-t3")  # Never this computer's T3.
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def hook_call(self, handle, inside=True):
         stdin = MagicMock(buffer=io.BytesIO(b"{}"))

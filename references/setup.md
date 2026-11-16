@@ -26,20 +26,24 @@ Until the binding exists, your hook does not guard this session. Read and ask; c
 
 ## 2. Ask about models and DevOps
 
-Each role runs on its default model unless the user picks an OpenRouter model for it. Run `models`
+Each role has a default model, and the user can pick any model their T3 runs instead. Run `models`
 the way step 3 runs `init`, with the ids from step 1:
 
 ```json
 {"op":"models","projectId":"<T3 project id>","threadId":"<this thread's id>","search":"<words>"}
 ```
 
-- If `goose` is false, tell the user its `reason` and go on: every role keeps its default.
-- Otherwise ask, for the implementer, the reviewer and DevOps in turn, for a model or a skip. Search
-  with the user's words and show the matches; `more` counts the ones not shown. Offer only a model the
-  list returned.
-- Ask for an effort (low, medium, high or max) only when the chosen model has `"thinking": true`.
+- If `known` is false, tell the user its `reason` and go on: every role keeps its default.
+- Otherwise tell the user which `providers` T3 can run, and why any other cannot. If none is ready,
+  stop: T3 needs Claude, Codex or goose enabled and signed in.
+- Then, for the implementer, the reviewer and DevOps in turn, show the role's default from `defaults`.
+  When its `runs` is true, ask for another model or a skip. When it is false, this T3 cannot run it,
+  so the user picks one; `init` refuses that role without a pick.
+- Search with the user's words and show the matches with their `provider`; `more` counts the ones not
+  shown. Offer only a model the list returned.
+- Ask for an effort (low, medium, high or max) only when the chosen model has `"effort": true`.
 - A picked role always runs on its pick. A skipped role keeps its default, and Jev may advise another
-  model for an implementer or reviewer.
+  model this T3 runs for an implementer or reviewer.
 
 Add the picks to `init` as `"picks":{"reviewer":{"model":"<model>","effort":"high"}}`, or as
 `"reviewer":"<model>"` when no effort was asked.
@@ -82,7 +86,7 @@ In Codex's PowerShell, pipe a here-string instead, and keep the JSON ASCII (writ
 | `noChecksReason` | Why there are no local checks, when `checks` is empty |
 | `defaults` | Models and efforts without a pick or Jev's answer: implementer GPT-6.1-Sol at high, reviewer Sonnet 5.5 at high, DevOps Opus 5.5 at `xhigh` |
 | `quietMinutes` | Minutes before the watcher reports a quiet worker (default 30) |
-| `picks` | The user's OpenRouter model per role, from step 2 |
+| `picks` | The user's model per role, from step 2 |
 | `devops` | `false` merges without a DevOps worker (default `true`), from step 2 |
 
 The binding starts paused. If it says the project is already bound, point the user to its orchestrator

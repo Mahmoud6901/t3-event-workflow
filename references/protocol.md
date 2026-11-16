@@ -20,7 +20,7 @@ with a reason you can act on.
 | control | `{"op":"control","action":"activate","authorization":"<the user's words>"}` | `control` |
 | status | `{"op":"status"}` | plans, tasks, each role's model, working workers, open asks, problems |
 | setup_github | `{"op":"setup_github","authorization":"<the user's words>"}` | `repo`, `changed` |
-| models | `{"op":"models","search":"qwen"}` | `models`, each with `thinking`, or a `reason` |
+| models | `{"op":"models","search":"qwen"}` | `providers`, `defaults` (each with `runs`), `models` (each with `provider`, `effort`) |
 | pick | `{"op":"pick","role":"reviewer","model":"…","authorization":"<the user's words>"}` | `model`, `effort`, `source` |
 | devops | `{"op":"devops","on":false,"authorization":"<the user's words>"}` | `devops`, `keep` |
 
@@ -59,8 +59,8 @@ with a reason you can act on.
   auto-merge off. It protects the branch with a required PR (0 approvals), the CI checks plus
   `t3/review` on an up-to-date branch, admins included, and no force-push or deletion. It changes
   only what differs, and needs the user's own words.
-- **pick** sets a role's model from `models`, with `effort` (low to max) only if it has `thinking`.
-  `"model":"default"` goes back. Running workers keep theirs.
+- **pick** sets a role's model from `models`, with `effort` (low to max) only for one with `"effort": true`.
+  `"model":"default"` goes back, if T3 runs the default. Running workers keep theirs.
 - **devops** turns DevOps on or off for plans that start later; `keep` lists running plans that stay as
   they are. Off, `next` merges each confirmed PR itself, one at a time, with DevOps's update and merge
   checks; the watcher wakes you when CI finishes. Every CI failure goes to the implementer.

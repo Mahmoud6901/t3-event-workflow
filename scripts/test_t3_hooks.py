@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import flow
 import harness
 import t3_hooks
 
@@ -24,6 +25,9 @@ class HookTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
+        patcher = patch.object(flow, "T3_CACHES", root / "no-t3")  # Never this computer's T3.
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.workspace = root / "app"
         (self.workspace / ".git").mkdir(parents=True)
         self.db = root / "state" / "harness.sqlite3"

@@ -25,7 +25,8 @@ SCRIPTS = Path(__file__).resolve().parent
 ROOT = SCRIPTS.parent
 DEFAULT_DB = places.STATE / "harness.sqlite3"
 GOOSE = "acpRegistry_goose"
-GOOSE_CACHE = Path.home() / ".t3" / "caches" / "acpRegistry_goose.json"  # The OpenRouter models T3 can run.
+T3_CACHES = Path.home() / ".t3" / "caches"  # T3's list of what each provider can run, one file per provider.
+PROVIDERS = {"claudeAgent": ("Claude", "effort"), "codex": ("Codex", "reasoningEffort"), GOOSE: ("goose", "thinking_effort")}
 MATCHES = 20  # Models one search shows.
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 ROLES = ("implementer", "reviewer", "devops")
@@ -141,17 +142,36 @@ def validate_config(raw):
     return config
 
 
-def goose_list():
-    """T3's goose models as {slug: declares thinking_effort}, or None and why goose cannot run them."""
-    try:
-        cache = json.loads(Path(GOOSE_CACHE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None, "T3 has no goose list, so goose is not installed there"
-    if not (cache.get("enabled") and cache.get("installed") and cache.get("status") == "ready"):
-        return None, "goose is not enabled and ready in T3"
-    models = {m["slug"]: any(d.get("id") == "thinking_effort" for d in (m.get("capabilities") or {}).get("optionDescriptors") or [])
-              for m in cache.get("models") or [] if isinstance(m, dict) and isinstance(m.get("slug"), str)}
-    return (models, None) if models else (None, "T3's goose list is empty")
+def t3_lists():
+    """What this computer's T3 can run: ({provider: {model: declares an effort option}} for each ready provider,
+    {provider: why not} for the others). (None, {}) when T3's lists are not here, so nothing can be checked."""
+    if not Path(T3_CACHES).is_dir():
+        return None, {}
+    lists, why = {}, {}
+    for provider, (name, option) in PROVIDERS.items():
+        try:
+            cache = json.loads((Path(T3_CACHES) / f"{provider}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            why[provider] = f"T3 has no {name} list, so {name} is not installed there"
+            continue
+        if not (cache.get("enabled") and cache.get("installed") and cache.get("status") == "ready"):
+            why[provider] = f"{name} is not enabled and ready in T3"
+            continue
+        if (cache.get("auth") or {}).get("status") == "unauthenticated":
+            why[provider] = f"{name} is not signed in, in T3"
+            continue
+        models = {m["slug"]: any(d.get("id") == option for d in (m.get("capabilities") or {}).get("optionDescriptors") or [])
+                  for m in cache.get("models") or [] if isinstance(m, dict) and isinstance(m.get("slug"), str)}
+        if models:
+            lists[provider] = models
+        else:
+            why[provider] = f"T3's {name} list is empty"
+    return lists, why
+
+
+def runs(lists, model, provider):
+    """Whether T3 can run the model; None when T3's lists are not here."""
+    return None if lists is None else model in lists.get(provider, {})
 
 
 def devops_on(state, name):
@@ -179,17 +199,18 @@ def role_model(config, state, role):
     return {"model": config["defaults"][role], "effort": config["defaults"][role + "Effort"], "source": "default"}
 
 
-def picked(role, raw, defaults):
-    """A role's OpenRouter model, chosen by the user from T3's goose list: {"model", "effort", "thinking"}."""
+def picked(role, raw, defaults, lists):
+    """A role's model, chosen by the user from what T3 can run (Claude, Codex or goose):
+    {"model", "effort", "provider", "thinking"}."""
     require(role in ROLES, f"picks are for {', '.join(ROLES)}")
     raw = raw if isinstance(raw, dict) else {"model": raw}
-    found, reason = goose_list()
-    require(found is not None, f"No OpenRouter model can be picked: {reason}")
     model = text(raw.get("model"), f"picks.{role}.model")
-    require(model in found, f"{model} is not in T3's goose list; search it with the models operation")
+    require(lists is not None, "T3's model lists are not on this computer, so no model can be picked")
+    provider = next((p for p in PROVIDERS if model in lists.get(p, {})), None)
+    require(provider, f"T3 cannot run {model}; search what it can with the models operation")
     effort = raw.get("effort") or defaults[role + "Effort"]
     require(effort in EFFORTS, f"picks.{role}.effort must be one of {', '.join(EFFORTS)}")
-    return {"model": model, "effort": effort, "thinking": found[model]}
+    return {"model": model, "effort": effort, "provider": provider, "thinking": lists[provider][model]}
 
 
 def default_jev(config, context):
@@ -271,12 +292,21 @@ class Flow:
                                      if req.get(k) is not None}})
         require(not self.path.is_relative_to(Path(config["workspace"])), "The harness database must live outside the project")
         picks = req.get("picks") or {}
-        require(isinstance(picks, dict), "picks maps a role to its OpenRouter model")
+        require(isinstance(picks, dict), "picks maps a role to its model")
         devops = req.get("devops", True)
         require(isinstance(devops, bool), "devops is true (a DevOps worker merges) or false (the harness merges)")
+        lists, why = t3_lists()
         state = new_state()
-        state["picks"] = {role: picked(role, raw, config["defaults"]) for role, raw in picks.items()}
+        state["picks"] = {role: picked(role, raw, config["defaults"], lists) for role, raw in picks.items()}
         state["devopsOn"] = devops
+        if lists is not None:  # Every role must start on something this T3 runs, and Jev advises only among those.
+            for role in ROLES:
+                model = config["defaults"][role]
+                provider = config["models"][model]["provider"]
+                require(role in state["picks"] or runs(lists, model, provider),
+                        f"T3 cannot run {model}, the {role}'s default ({why.get(provider) or 'T3 does not list it'}). "
+                        f"Pick a model for the {role}; the models operation lists what T3 runs.")
+            config["models"] = {m: item for m, item in config["models"].items() if runs(lists, m, item["provider"])}
         with self.db:
             exists = self.db.execute("SELECT 1 FROM projects WHERE id=?", (project,)).fetchone()
             require(not exists, f"Project {project} is already bound")
@@ -284,14 +314,19 @@ class Flow:
         return {"projectId": project, "control": "paused", "repo": config["github"]["repo"]}
 
     def models(self, req):
-        """T3's goose models whose names hold every word searched for, for setup and for model changes."""
-        found, reason = goose_list()
-        if found is None:
-            return {"goose": False, "reason": f"{reason}. Every role keeps its default model."}
+        """For setup and model changes: which providers T3 can run, whether it runs each role's default, and the models
+        whose names hold every word searched for."""
+        lists, why = t3_lists()
+        defaults = {role: {"model": DEFAULTS[role], "effort": DEFAULTS[role + "Effort"],
+                           "runs": runs(lists, DEFAULTS[role], MODELS[DEFAULTS[role]]["provider"])} for role in ROLES}
+        if lists is None:
+            return {"known": False, "defaults": defaults,
+                    "reason": "T3's model lists are not on this computer, so nothing can be checked or picked."}
         words = str(req.get("search") or "").lower().split()
-        hits = [m for m in sorted(found) if all(w in m.lower() for w in words)]
-        return {"goose": True, "models": [{"model": m, "thinking": found[m]} for m in hits[:MATCHES]],
-                "more": max(0, len(hits) - MATCHES)}
+        hits = [{"model": m, "provider": PROVIDERS[p][0], "effort": lists[p][m]}
+                for p in PROVIDERS for m in sorted(lists.get(p, {})) if all(w in m.lower() for w in words)]
+        return {"known": True, "providers": {name: why.get(p, "ready") for p, (name, _) in PROVIDERS.items()},
+                "defaults": defaults, "models": hits[:MATCHES], "more": max(0, len(hits) - MATCHES)}
 
     def pick(self, project, req):
         """The user's later model change for a role; no model (or "default") goes back to the default.
@@ -301,12 +336,17 @@ class Flow:
         text(req.get("authorization"), "authorization (the user's own words)")
         raw = None if req.get("model") in (None, "", "default") else {"model": req.get("model"), "effort": req.get("effort")}
 
+        lists, _ = t3_lists()
+
         def change(config, state):
             picks = state.setdefault("picks", {})
             if raw is None:
+                model = config["defaults"][role]
+                require(model in config["models"] and runs(lists, model, config["models"][model]["provider"]) is not False,
+                        f"T3 cannot run {model}, the {role}'s default; pick another model")
                 picks.pop(role, None)
             else:
-                picks[role] = picked(role, raw, config["defaults"])
+                picks[role] = picked(role, raw, config["defaults"], lists)
             return {"role": role, **role_model(config, state, role)}
         return self.transact(project, change, "pick")
 
@@ -686,7 +726,7 @@ class Flow:
                   "job": None, "path": None}
         if pick:
             worker.update(model=pick["model"], effort=pick["effort"], modelSource="pick",
-                          entry={"provider": GOOSE, "roles": [role], "thinking": pick["thinking"]})
+                          entry={"provider": pick.get("provider", GOOSE), "roles": [role], "thinking": pick["thinking"]})
         state["workers"][worker["id"]] = worker
         return worker
 

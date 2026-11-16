@@ -27,6 +27,9 @@ class WatchTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
+        patcher = patch.object(flow, "T3_CACHES", root / "no-t3")  # Never this computer's T3.
+        patcher.start()
+        self.addCleanup(patcher.stop)
         (root / "app").mkdir()
         self.db = root / "state" / "harness.sqlite3"
         self.op("init", workspace=str(root / "app"), repo="owner/app", requiredChecks=["acceptance"], noChecksReason="Test")

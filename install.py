@@ -282,9 +282,11 @@ def requirements():
     problems = []
     if sys.version_info < (3, 11):
         problems.append(f"Python 3.11+ needed (this is {sys.version.split()[0]}).")
-    for tool in ("git", "gh", "claude"):
+    for tool in ("git", "gh"):
         if not shutil.which(tool):
             problems.append(f"`{tool}` is not on PATH.")
+    if not (shutil.which("claude") or shutil.which("codex")):
+        problems.append("Neither `claude` nor `codex` is on PATH: the orchestrator runs on one of them.")
     if shutil.which("gh"):
         try:
             if subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=60).returncode:

@@ -10,8 +10,12 @@ workflow merges confirmed PRs itself, with no model.
 ## Install (Windows, macOS, Linux)
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/) (or pipx), Git, the GitHub CLI (`gh`,
-signed in), T3 Code, and Claude Code (`claude`) on PATH. Codex (`codex`) is needed only to run the
-orchestrator on a Codex model.
+signed in), and T3 Code with at least one of Claude, Codex or goose (for OpenRouter) signed in. The
+orchestrator runs on Claude Code (`claude`) or Codex (`codex`), so one of them must be on PATH.
+
+The default models are GPT-6.1-Sol (Codex) for implementers, Sonnet 5.5 for reviewers and Opus 5.5 for
+DevOps. Setup checks which models your T3 can run, and asks you to pick one for any role whose default
+it cannot run.
 
 ```bash
 uv tool install git+https://github.com/Mahmoud6901/t3-event-workflow
