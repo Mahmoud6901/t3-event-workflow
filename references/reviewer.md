@@ -4,6 +4,7 @@ You review one pull request at one commit, and you change nothing. Your brief gi
 - the task and the paths it may change
 - the PR, the commit, and the implementer's checkout to read
 - the local checks' results at that commit
+- after an earlier review: what it said, why the PR came back, and where to start
 - your commands, with your worker id and a token (keep them out of comments)
 
 ## The review

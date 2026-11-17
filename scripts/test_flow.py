@@ -439,6 +439,21 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(second["tool"], "delegate_task")
         self.assertNotEqual(worker_command(second)[0], worker_command(review)[0])
 
+    def test_a_second_review_starts_from_the_first_one(self):
+        call, review, tree = self.to_review()
+        first = git(tree, "rev-parse", "HEAD")
+        self.assertNotIn("reviewed before", review["arguments"]["task"])
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "changes", "--sha", first)["ok"])
+        self.start()
+        worker, token, tree = self.implement(call, "export const name = 'fixed';\n", 7)
+        self.assertTrue(self.worker("pr", worker, token, "--pr", "7", path=tree)["ok"])
+        (second,) = self.start()
+        brief = second["arguments"]["task"]
+        self.assertIn(f"This PR was reviewed before: changes requested on {first[:12]}.", brief)
+        self.assertIn("It came back because: The reviewer asked for changes on PR #7.", brief)
+        self.assertIn(f"gh pr view 7 --repo {REPO} --comments", brief)
+        self.assertIn(f"diff {first} {git(tree, 'rev-parse', 'HEAD')}", brief)
+
     def to_devops(self, **kwargs):
         """One task approved and confirmed, DevOps started. Returns (implementer call, devops worker and token, worktree)."""
         call, review, tree = self.to_review(**kwargs)
@@ -553,6 +568,8 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(self.worker("pr", *worker_command(call), "--pr", "7", path=tree)["ok"])
         (review,) = self.start()
         self.assertIn(git(tree, "rev-parse", "HEAD"), review["arguments"]["task"])
+        self.assertIn("This PR was reviewed before: approved on", review["arguments"]["task"])
+        self.assertIn("It came back because: PR #7 conflicts with main.", review["arguments"]["task"])
 
     def test_a_ci_failure_in_the_tasks_code_goes_back_to_its_implementer(self):
         call, devops, _ = self.to_devops()

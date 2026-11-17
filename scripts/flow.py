@@ -796,6 +796,7 @@ class Flow:
         if not worker["childThreadId"]:
             return  # Its start is not confirmed yet.
         fix = task.pop("fix")
+        task["returned"] = fix["detail"]  # The next reviewer is told why the PR came back.
         worker["job"] = {"kind": "fix", "reported": False, "nudged": 0}
         me = f"--worker {worker['id']} --token {worker['token']}"
         guide = {"review": f"Read the reviewer's comment (gh pr view {task.get('pr')} --comments) and address it.",
@@ -959,6 +960,8 @@ class Flow:
             task = state["tasks"][worker["task"]]
             require(task["rev"] == rev, "The task changed during your review; end your turn")
             state["workers"][worker["id"]]["job"]["reported"] = True
+            task.setdefault("reviews", []).append({"sha": sha, "verdict": verdict})
+            task.pop("returned", None)
             if verdict == "approve":
                 task["approvedSha"] = sha
                 self.move(task, "approved", f"t3/review on {sha[:12]}")
@@ -1380,6 +1383,23 @@ def evidence_lines(task):
     return [f"{r['name']}: {'passed' if r['passed'] else 'failed'} (log {slash(r['log'])})" for r in evidence["results"]]
 
 
+VERDICTS = {"approve": "approved", "changes": "changes requested"}
+
+
+def reviewed_before(config, task, tree):
+    """For a PR reviewed before: what each review said, why the PR came back, and where the next review starts."""
+    reviews = task.get("reviews") or []
+    if not reviews:
+        return []
+    said = ", then ".join(f"{VERDICTS[r['verdict']]} on {r['sha'][:12]}" for r in reviews)
+    return [f"This PR was reviewed before: {said}.",
+            *([f"It came back because: {task['returned']}"] if task.get("returned") else []),
+            f"Start there: read the earlier review comments (gh pr view {task['pr']} --repo {config['github']['repo']} "
+            f"--comments) and check that each blocking point is fixed. Then review the whole change as usual.",
+            f"What changed since the last review (after an update, main's changes too): "
+            f"git -C {tree} diff {reviews[-1]['sha']} {task['head']}"]
+
+
 def reviewer_brief(config, task, worker):
     me = f"--worker {worker['id']} --token {worker['token']}"
     tree, head, branch = slash(task["worktree"]), task["head"], config["branch"]
@@ -1391,6 +1411,7 @@ def reviewer_brief(config, task, worker):
         f"Review PR #{task['pr']} ({task.get('url')}) at commit {head}, branch {task['branch']}.",
         f"The implementer's checkout is {tree}. Read and test there; change nothing in it: no edits, commits or pushes.",
         f"The change: git -C {tree} diff origin/{branch}...{head}",
+        *reviewed_before(config, task, tree),
         "Local checks at that commit:", *[f"- {line}" for line in evidence_lines(task)],
         f"Post your findings as one comment: gh pr comment {task['pr']} --repo {config['github']['repo']} --body \"...\"",
         f"Then run {command('worker', 'review', me, '--verdict', 'approve', '--sha', head)} "
