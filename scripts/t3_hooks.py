@@ -3,8 +3,10 @@
 Hook settings run: t3-workflow hook <claude|codex> <pre_tool_use|user_prompt_submit|stop>, with the hook JSON on stdin.
 Only a bound orchestrator's thread is acted on, and only in a workflow turn: the user's "use t3 workflow", or a wake.
 T3 keeps a thread's id when the user moves it between Claude and Codex, so one binding serves both runtimes.
-Workers are not guarded here (goose runs no hooks); GitHub's protection of main is the hard guard.
-Inside a bound workspace an error denies or blocks: fail closed.
+GitHub's protection of main is the hard guard on what workers merge.
+In the shared install, the hook first finds the session's project. Every T3 session of a bound project, orchestrator
+or worker, in every turn, stays inside its own project (fence.py); goose runs no hooks. A project with its own copy
+(homes.py) is then served by that copy's hook. Inside a bound workspace an error denies or blocks: fail closed.
 """
 import base64
 from datetime import datetime, timezone
@@ -14,12 +16,15 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import subprocess
 import sys
 
 SCRIPTS = Path(__file__).resolve().parent
 ROOT = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS))
+from fence import Fence, operation  # noqa: E402 - standard library only, like this file
 import health  # noqa: E402 - standard library only, like this file
+import homes  # noqa: E402
 import places  # noqa: E402
 import store  # noqa: E402 - standard library only, like this file
 import trigger  # noqa: E402
@@ -28,7 +33,8 @@ import watcher  # noqa: E402
 
 HARNESS_DB = places.STATE / "harness.sqlite3"  # Same as flow.DEFAULT_DB.
 LIVE_DB = HARNESS_DB  # The watcher serves only this database, so a test's database never starts one.
-NATIVE_DB = Path.home() / ".t3" / "userdata" / "statev2.sqlite"
+HOMES = None if places.HOME else homes.ROOT  # The shared install routes to projects' own copies; a copy serves itself.
+NATIVE_DB = places.T3_HOME / "userdata" / "statev2.sqlite"
 REFERENCES = ROOT / "references"
 ROLE_DOCS = {"orchestrator": ("orchestrator.md", "protocol.md")}
 ACTIVE = ("starting", "running", "waiting")
@@ -48,7 +54,7 @@ READS = "Get-Content, Get-ChildItem, rg or Select-String, one plain command with
 def orchestrator_context(runtime):
     reads = f" Read files with {READS}." if runtime == "codex" else ""
     return ("T3 workflow orchestrator: you plan with the user and report to them; workers do the work in the background. "
-            f"Follow references/orchestrator.md.{reads} On every wake run the shell command {NEXT}, make each call it "
+            f"Follow {REFERENCES / 'orchestrator.md'}.{reads} On every wake run the shell command {NEXT}, make each call it "
             "returns in order, record what T3 returned with t3-workflow '{\"op\":\"done\",\"results\":[...]}', give the "
             "user its tell lines and put its asks to them, then end your turn. On the user's message, plan with queue_set "
             "or queue_edit. You edit nothing and run no other command.")
@@ -64,15 +70,7 @@ def bindings():
         db.close()
 
 
-def worktrees(workspace):
-    """The bound folder plus its git worktrees (T3 moves a session into one), read from .git without running git."""
-    roots = [Path(workspace)]
-    for gitdir in (Path(workspace) / ".git" / "worktrees").glob("*/gitdir"):
-        try:
-            roots.append(Path(gitdir.read_text(encoding="utf-8").strip()).parent)
-        except OSError:
-            pass
-    return roots
+worktrees = homes.worktrees
 
 
 def inside_workspace(cwd, rows):
@@ -128,22 +126,6 @@ def block(reason):
 
 def tool_suffix(name):
     return name.split("__")[-1] if name.startswith("mcp__") else name
-
-
-def operation(command):
-    """The orchestrator's `t3-workflow '<JSON>'` or `t3-workflow <base64 JSON>` command, or None."""
-    if not isinstance(command, str):
-        return None
-    source = re.sub(r"(?:\s+2>&1)?\s+\|\s*head\s+-c\s+[1-9][0-9]*$", "", command.strip())
-    quoted = re.fullmatch(r"t3-workflow '(\{[^\r\n]*\})'", source)
-    encoded = re.fullmatch(r"t3-workflow ([A-Za-z0-9+/]+={0,2})", source)
-    if not quoted and not encoded:
-        return None
-    try:
-        value = json.loads(quoted.group(1) if quoted else base64.b64decode(encoded.group(1)).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
 
 
 def unquoted(word):
@@ -294,15 +276,70 @@ def ordinary_turn(native, thread_id):
     return None
 
 
-def keep_watcher_alive():
-    """A bound session restarts a dead watcher, which nothing else does between logons. This never changes a hook's result."""
+def keep_watcher_alive(home=None):
+    """A bound session restarts a dead watcher (its project's own, for a project with its own copy), which nothing else
+    does between logons. This never changes a hook's result."""
     if Path(HARNESS_DB) != Path(LIVE_DB):
         return
     try:
-        if watcher.ensure(Path(HARNESS_DB).parent):
+        if home and watcher.ensure(Path(home) / "state", Path(home) / "scripts" / "watch.py"):
+            TRACE.append(f"{Path(home).name}: its watcher restarted")
+        if watcher.ensure(Path(HARNESS_DB).parent):  # The shared one, which keeps every project's own watcher alive.
             TRACE.append("watcher restarted")
     except Exception as error:
         TRACE.append(f"watcher not restarted: {type(error).__name__}: {error}")
+
+
+def fence_for(cwd, workspace, home=None):
+    """The fence of the project whose folder is `workspace` (its own copy is `home`, if it has one)."""
+    others = [folder for h, data in homes.listing(HOMES) if h != home for folder in worktrees(data["workspace"])]
+    others += [folder for config, _ in bindings() if config["workspace"] != workspace for folder in worktrees(config["workspace"])]
+    return Fence(cwd, worktrees(workspace), others, code=[places.CODE],
+                 data=[Path(HARNESS_DB).parent, places.SECRETS, *([HOMES] if HOMES else [])], home=home,
+                 t3=Path(NATIVE_DB).parent)
+
+
+def delegate(home, runtime, hook, data):
+    """The project's own copy's hook decides, from its own code and data."""
+    done = subprocess.run([sys.executable, "-B", str(Path(home) / "scripts" / "t3_hooks.py"), runtime, hook],
+                          input=json.dumps(data).encode("utf-8"), capture_output=True, timeout=100)
+    if done.returncode:
+        raise RuntimeError(f"{Path(home).name}: its hook failed: {done.stderr.decode('utf-8', 'replace').strip()[-300:]}")
+    answer = done.stdout.decode("utf-8").strip()
+    return json.loads(answer) if answer else None
+
+
+def route(runtime, hook, data):
+    """In the shared install: find the session's project, fence it, and let its own copy, if it has one, decide."""
+    cwd = data.get("cwd")
+    found = homes.find(cwd, HOMES) if HOMES else None
+    shared = None if found else next((c for c, s in bindings() if inside_workspace(cwd, [(c, s)])), None)
+    if not found and not shared:
+        TRACE.append("outside bound workspaces")
+        return None
+    native = Native()
+    try:
+        thread_id = native.thread_for_session(data.get("session_id", ""))
+    finally:
+        native.close()
+    if not thread_id:
+        TRACE.append("session unknown to T3")
+        return None  # Not a T3 session (for example a plain CLI session in the same folder).
+    home = found[0] if found else None
+    if hook == "pre_tool_use":
+        reason = fence_for(cwd, found[1]["workspace"] if found else shared["workspace"], home).check(
+            runtime, data.get("tool_name") or "", data.get("tool_input") or {})
+        if reason:
+            TRACE.append(f"fenced: {reason}")
+            return deny(reason)
+    if not home:
+        return handle(runtime, hook, data)
+    keep_watcher_alive(home)
+    if not any(config.get("orchestrator") == thread_id for config, _ in homes.rows(home)):
+        TRACE.append(f"thread={thread_id} is no orchestrator of {home.name}")
+        return None
+    TRACE.append(f"served by {home.name}")
+    return delegate(home, runtime, hook, data)
 
 
 def handle(runtime, hook, data):
@@ -350,12 +387,12 @@ def main(argv=None):
     verdict = None
     try:
         data = json.loads(sys.stdin.buffer.read().decode("utf-8") or "{}")
-        verdict = handle(runtime, hook, data)
+        verdict = route(runtime, hook, data) if HOMES else handle(runtime, hook, data)
         health.ok(HARNESS_DB.parent, "hooks")
     except Exception as error:  # Fail closed: a crashing hook would otherwise let the action through.
         message = f"T3_WORKFLOW_GUARD_ERROR: {type(error).__name__}: {error}. Nothing was executed; read workflow status."
         try:
-            in_workflow = inside_workspace(data.get("cwd"), bindings())
+            in_workflow = inside_workspace(data.get("cwd"), bindings()) or bool(HOMES and homes.find(data.get("cwd"), HOMES))
         except Exception:
             in_workflow = True
         if in_workflow:

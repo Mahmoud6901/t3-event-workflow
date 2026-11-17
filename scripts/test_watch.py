@@ -103,6 +103,26 @@ class WatchTests(unittest.TestCase):
                 patch.object(watch, "t3_send", MagicMock()), patch.object(sys, "argv", ["watch.py", "--once"]):
             self.assertEqual(watch.main(), 0)
 
+    def test_each_pass_keeps_every_projects_own_watcher_alive(self):
+        root = Path(self.tmp.name) / "state" / "homes"
+        for name in ("app-1", "shop-2"):
+            (root / name / "state").mkdir(parents=True)
+            (root / name / "home.json").write_text(json.dumps({"project": name, "workspace": str(root / name)}))
+        ensure = MagicMock(return_value=False)
+        with patch.object(watch, "HOMES", root), patch.object(watch.watcher, "ensure", ensure):
+            self.watch_once()
+        self.assertEqual([c.args for c in ensure.call_args_list],
+                         [(root / n / "state", root / n / "scripts" / "watch.py") for n in ("app-1", "shop-2")])
+
+    def test_a_watcher_whose_code_changed_ends_so_the_new_code_starts(self):
+        with patch.object(watch, "code_version", side_effect=["before", "after"]), patch.object(watch.time, "sleep") as sleep, \
+                patch.object(watch, "DEFAULT_DB", self.db), patch.object(watch, "NATIVE_DB", self.native_path), \
+                patch.object(watch, "LOG", self.db.parent / "watch.log"), patch.object(watch, "t3_running", return_value=True), \
+                patch.object(watch, "t3_send", MagicMock()), patch.object(sys, "argv", ["watch.py"]):
+            self.assertEqual(watch.main(), 0)
+        sleep.assert_not_called()
+        self.assertIn("code changed", (self.db.parent / "watch.log").read_text())
+
     def test_a_pass_that_keeps_failing_is_a_problem_and_a_good_pass_clears_it(self):
         broken = Path(self.tmp.name) / "not-a-database.sqlite"
         broken.write_text("not sqlite")

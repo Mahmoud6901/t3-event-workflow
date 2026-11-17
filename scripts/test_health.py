@@ -81,7 +81,7 @@ class PartsReportTests(unittest.TestCase):
 
     def hook_call(self, handle, inside=True):
         stdin = MagicMock(buffer=io.BytesIO(b"{}"))
-        with patch.object(t3_hooks, "HARNESS_DB", self.state / "x.sqlite3"), patch.object(t3_hooks, "handle", handle),                 patch.object(t3_hooks, "inside_workspace", return_value=inside), patch.object(t3_hooks, "bindings", return_value=[]),                 patch.object(t3_hooks, "TRACE", []), patch.object(sys, "argv", ["t3_hooks", "claude", "pre_tool_use"]),                 patch.object(sys, "stdin", stdin), patch.object(sys, "stdout", io.StringIO()):
+        with patch.object(t3_hooks, "HARNESS_DB", self.state / "x.sqlite3"), patch.object(t3_hooks, "handle", handle), patch.object(t3_hooks, "HOMES", None),                 patch.object(t3_hooks, "inside_workspace", return_value=inside), patch.object(t3_hooks, "bindings", return_value=[]),                 patch.object(t3_hooks, "TRACE", []), patch.object(sys, "argv", ["t3_hooks", "claude", "pre_tool_use"]),                 patch.object(sys, "stdin", stdin), patch.object(sys, "stdout", io.StringIO()):
             return t3_hooks.main()
 
     def test_a_crashing_hook_in_a_bound_workspace_is_a_problem_and_its_next_good_call_clears_it(self):

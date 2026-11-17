@@ -36,12 +36,12 @@ def running(state_dir):
     return False
 
 
-def start():
+def start(script=SCRIPT):
     """A detached, windowless watcher that outlives the hook and the session that started it."""
-    command = [str(Path(sys.executable).with_name("pythonw.exe") if os.name == "nt" else sys.executable), str(SCRIPT)]
+    command = [str(Path(sys.executable).with_name("pythonw.exe") if os.name == "nt" else sys.executable), str(script)]
     if os.name == "nt" and not Path(command[0]).exists():
         command[0] = sys.executable
-    options = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "cwd": str(SCRIPT.parent.parent)}
+    options = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "cwd": str(Path(script).parent.parent)}
     if os.name != "nt":
         subprocess.Popen(command, start_new_session=True, **options)
         return
@@ -52,9 +52,10 @@ def start():
         subprocess.Popen(command, creationflags=flags, **options)
 
 
-def ensure(state_dir):
-    """Start the watcher when nothing holds its lock; True when one was started."""
-    if running(state_dir):
+def ensure(state_dir, script=SCRIPT):
+    """Start the watcher (`script`, of the copy whose data is state_dir) when nothing holds its lock; True when one was
+    started. T3_WORKFLOW_NO_WATCHER=1 starts none: for tests, and for running without a background process."""
+    if os.environ.get("T3_WORKFLOW_NO_WATCHER") == "1" or running(state_dir):
         return False
-    start()
+    start(script)
     return True

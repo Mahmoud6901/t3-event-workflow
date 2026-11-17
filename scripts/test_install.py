@@ -55,6 +55,52 @@ class InstallTests(unittest.TestCase):
             self.assertIn("Problem: scan failed 3 times in a row", out.getvalue())
             self.assertIn("database is locked", out.getvalue())
 
+    def test_upgrade_moves_each_project_into_its_own_copy_and_brings_each_copy_to_this_version(self):
+        import contextlib
+        import io
+        import flow
+        import homes
+        import store
+        state = install.STATE
+        workspace = self.home / "my app"
+        (workspace / ".git").mkdir(parents=True)
+        with patch.object(flow, "T3_CACHES", self.home / "no-t3"):
+            engine = flow.Flow(state / "harness.sqlite3", hub=lambda repo: None, jev=lambda config, context: {})
+            engine.orchestrator({"op": "init", "projectId": "app", "threadId": "orch", "workspace": str(workspace),
+                                 "repo": "owner/app", "requiredChecks": ["acceptance"], "noChecksReason": "Test"})
+            engine.close()
+
+        def run(*argv):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = install.main([*argv, "--home", str(self.home)])
+            return code, out.getvalue()
+        code, out = run("status")
+        self.assertIn("my app is still in the shared data: run t3-workflow upgrade", out)
+        code, out = run("upgrade")
+        self.assertEqual(code, 0)
+        (home, data), = homes.listing(state / "homes")
+        self.assertIn(f"my app: moved into its own folder {home}", out)
+        db = store.connect(state / "harness.sqlite3", readonly=True)
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone(), (0,))
+        db.close()
+        self.assertIn("[x] my app: its own copy, this version", run("status")[1])
+        (home / "scripts" / "flow.py").write_text("# older\n")
+        self.assertIn("[ ] my app: its own copy is an older version: run t3-workflow upgrade", run("status")[1])
+        self.assertIn("my app: brought to this version", run("upgrade")[1])
+        self.assertIn("[x] my app: its own copy, this version", run("status")[1])
+
+    def test_a_project_that_cannot_move_is_named_and_the_others_still_move(self):
+        import contextlib
+        import io
+        with patch.object(install, "shared_bindings", return_value=[("a", "/w/first"), ("b", "/w/second")]), \
+                patch.object(install.homes, "move", side_effect=[install.homes.Failed("locked"), Path("/h/second")]):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(install.main(["upgrade", "--home", str(self.home)]), 1)
+        self.assertIn("first: not moved, it stays in the shared data: Failed: locked", out.getvalue())
+        self.assertIn("second: moved into its own folder", out.getvalue())
+
     def test_the_command_runs_a_hook(self):
         import t3_hooks
         with patch.object(t3_hooks, "main", return_value=0) as hook:

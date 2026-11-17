@@ -5,7 +5,8 @@ This applies only inside T3 Code. A T3 connector in another application is not e
 The workflow is opt-in (the user's rule, 2026-11-03). It runs only when the user's message says
 "use t3 workflow", or when an agent message carries it on in a bound orchestrator thread: a finished
 worker's "Delegated task …" notice, or the watcher's message. Any other message gets an ordinary
-answer, even in a bound thread. The hooks leave such a turn alone. The phrase right after a quote
+answer, even in a bound thread. The orchestrator's guard leaves such a turn alone; the fence that
+keeps every session of a bound project inside that project applies in every turn. The phrase right after a quote
 mark, as in a pasted handoff quoting this rule, only names it.
 
 When it applies, find your place below:

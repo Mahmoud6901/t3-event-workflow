@@ -44,7 +44,7 @@ class HookTests(unittest.TestCase):
             for thread in (ORCH, "child"):
                 db.execute("INSERT INTO orchestration_v2_projection_provider_threads VALUES (?,?)",
                            (thread, json.dumps({"nativeThreadRef": {"nativeId": "sess-" + thread}})))
-        for name, value in (("HARNESS_DB", self.db), ("NATIVE_DB", self.native)):
+        for name, value in (("HARNESS_DB", self.db), ("NATIVE_DB", self.native), ("HOMES", root / "homes")):
             patcher = patch.object(t3_hooks, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)

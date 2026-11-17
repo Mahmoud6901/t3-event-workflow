@@ -5,6 +5,8 @@ worker whose T3 run is still going but has not moved for its binding's quietMinu
 and the orchestrator gets one message per quiet spell naming it. The orchestrator restarts it only on the user's word.
 A worker whose run ended is not watched: T3 wakes the orchestrator for that. For a plan without DevOps it also wakes
 the orchestrator once per merge step the harness can take (see Flow.merge_wake). Nothing else is sent or changed.
+Each project with its own copy (homes.py) has its own watcher, running that copy: the shared one keeps them alive.
+A watcher whose code changed (an upgrade) ends, so the next start runs the new code.
 
     python watch.py          run until stopped (the installer starts it at logon)
     python watch.py --once   one pass, then exit
@@ -22,15 +24,25 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import flow  # noqa: E402
 import health  # noqa: E402
+import homes  # noqa: E402
+import places  # noqa: E402
 import watcher  # noqa: E402
 
 INTERVAL = 60
 ACTIVE = ("starting", "running", "waiting")
-T3_HOME = Path(os.environ.get("T3CODE_HOME", Path.home() / ".t3"))
+T3_HOME = places.T3_HOME
 NATIVE_DB = T3_HOME / "userdata" / "statev2.sqlite"
 T3_CLI = T3_HOME / "bin" / ("t3.cmd" if os.name == "nt" else "t3")
 DEFAULT_DB = flow.DEFAULT_DB
 LOG = DEFAULT_DB.parent / "watch.log"
+HOMES = None if places.HOME else homes.ROOT  # The shared watcher keeps each project's own watcher alive.
+
+
+def code_version():
+    try:
+        return homes.fingerprint(places.CODE)
+    except OSError:
+        return None
 
 
 def instant(value):
@@ -150,6 +162,7 @@ def main():
     if not lock:
         return 0
     log("watcher started")
+    version = code_version()
     while True:
         try:  # A bad pass must not end the watcher; it is logged, counted and tried again.
             if t3_running() and NATIVE_DB.exists() and DEFAULT_DB.exists():
@@ -166,12 +179,21 @@ def main():
                 finally:
                     engine.close()
                 health.ok(DEFAULT_DB.parent, "scan", beat=True)
+            if HOMES and t3_running():
+                for home, _ in homes.listing(HOMES):
+                    if watcher.ensure(home / "state", home / "scripts" / "watch.py"):
+                        log(f"started {home.name}'s watcher")
         except Exception as error:
             log(f"scan error: {type(error).__name__}: {error}")
             health.failed(DEFAULT_DB.parent, "scan", f"{type(error).__name__}: {error}")
         if args.once:
-            return 0
+            break
+        if code_version() != version:
+            log("code changed: this watcher ends so the new code starts")
+            break
         time.sleep(INTERVAL)
+    lock.close()
+    return 0
 
 
 if __name__ == "__main__":

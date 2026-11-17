@@ -27,7 +27,8 @@ t3-workflow install
 ```
 
 With pipx instead: `pipx install git+https://github.com/Mahmoud6901/t3-event-workflow`. To upgrade later:
-`uv tool upgrade t3-event-workflow`.
+`uv tool upgrade t3-event-workflow`, then `t3-workflow upgrade`, which brings each project's own copy to the
+new version (see [Each project apart](#each-project-apart)).
 
 Then:
 
@@ -48,15 +49,15 @@ Then:
    project". It becomes the orchestrator, and the binding starts paused until you activate it. You
    can move that thread between Claude and Codex models in T3 at any time.
 
-`t3-workflow status` shows what is installed, and any background part that keeps failing; it exits 1
-if one does. `t3-workflow uninstall` removes it all again. Every file it edits is backed up to
+`t3-workflow status` shows what is installed, each project's own copy and whether it is at this
+version, and any background part that keeps failing; it exits 1 if one does. `t3-workflow uninstall` removes it all again. Every file it edits is backed up to
 `~/.t3-workflow/state/backups/` first.
 
 ## What the installer changes
 
 | File | Change |
 |---|---|
-| `~/.claude/settings.json` | Hooks that guard the orchestrator and record its workers' wakes |
+| `~/.claude/settings.json` | Hooks that keep each project's sessions inside it, guard the orchestrator and record its workers' wakes |
 | `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` | A marked block pointing to `references/session-default.md` |
 | `~/.codex/hooks.json` | The same hooks, for an orchestrator on a Codex model |
 | `~/.t3/userdata/settings.json` | Goose `customModels` for OpenRouter models T3 does not list |
@@ -67,8 +68,31 @@ if one does. `t3-workflow uninstall` removes it all again. Every file it edits i
 The workflow has only been tried on Windows so far. The macOS and Linux parts are covered by tests, not
 yet by a real login; reports are welcome.
 
-Everything else stays in `~/.t3-workflow/`: `state/` (bindings, logs, health, backups) and `secrets/`
-belong to each computer. A clone that already has its own `state/` folder keeps using it instead.
+Everything else stays in `~/.t3-workflow/`: `state/` (logs, health, backups, and each project's own
+copy in `state/homes/`) and `secrets/` belong to each computer. A clone that already has its own `state/`
+folder keeps using it instead.
+
+## Each project apart
+
+Each bound project runs its own copy of the workflow, with its own data: `state/homes/<project>/` holds
+the code it runs and its own `state/` (its binding, logs and watcher). Setup makes the copy. Nothing one
+project's sessions run or change reaches another project's copy or data.
+
+The hooks also keep every T3 session of a bound project, the orchestrator and its workers, inside that
+project, in every turn:
+
+- they change files only in the project's folder, its git worktrees and the temporary folder;
+- they never read another bound project's folders, the workflow's data or T3's own database, which holds
+  every project's conversations;
+- they read only the workflow's published code, and never change it.
+
+Shell commands are judged by the paths they name. That stops mistakes and plain attempts, not a
+determined program. Goose workers run no hooks, and every session still runs as you: only separate user
+accounts would be a hard wall.
+
+After `uv tool upgrade t3-event-workflow`, run `t3-workflow upgrade`. It moves each binding an older
+version kept in the shared data into its own copy, and brings every copy to the new version. `t3-workflow status` names a copy that
+is older. Workers that started before keep working, and each project's watcher restarts on the new code.
 
 ## Read next
 

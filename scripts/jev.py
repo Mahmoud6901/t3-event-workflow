@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 import places
 
 ENDPOINT = "https://api.typesafe.ai/v1/systemone"
-KEY_ROOT = places.BASE  # The key file is relative to the data folder and must stay inside it.
+KEY_ROOT = places.SHARED  # The key file is relative to the shared data folder and must stay inside it.
 DEFAULT_KEY_FILE = "secrets/typesafe-api-key.txt"
 MAX_RESPONSE_BYTES = 256_000
 TIMEOUT_SECONDS = 20

@@ -1,4 +1,5 @@
 """The watcher's lock tells whether it lives, and a bound session's hook restarts a dead one."""
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,6 +13,9 @@ class WatcherLifeTests(unittest.TestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.state = Path(folder.name)
+        patcher = patch.dict(os.environ, {"T3_WORKFLOW_NO_WATCHER": ""})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_a_held_lock_means_running_and_nothing_is_started(self):
         lock = watcher.hold(self.state)
@@ -26,7 +30,13 @@ class WatcherLifeTests(unittest.TestCase):
         self.assertFalse(watcher.running(self.state))
         with patch.object(watcher, "start") as start:
             self.assertTrue(watcher.ensure(self.state))
-        start.assert_called_once_with()
+            self.assertTrue(watcher.ensure(self.state / "home", self.state / "home" / "scripts" / "watch.py"))
+        self.assertEqual([c.args for c in start.call_args_list], [(watcher.SCRIPT,), (self.state / "home" / "scripts" / "watch.py",)])
+
+    def test_no_watcher_starts_when_the_environment_says_so(self):
+        with patch.dict(os.environ, {"T3_WORKFLOW_NO_WATCHER": "1"}), patch.object(watcher, "start") as start:
+            self.assertFalse(watcher.ensure(self.state))
+        start.assert_not_called()
 
     def test_asking_leaves_the_lock_free_for_the_watcher_it_starts(self):
         watcher.running(self.state)

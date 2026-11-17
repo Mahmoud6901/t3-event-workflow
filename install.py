@@ -2,7 +2,9 @@
 """Install the T3 event workflow on this computer (Windows, macOS or Linux).
 
     t3-workflow install     add the hooks and instruction pointers (safe to repeat)
-    t3-workflow status      show what is installed
+    t3-workflow status      show what is installed, and each project's own copy
+    t3-workflow upgrade     after updating the package: move each project into its own copy and bring every copy
+                            to this version (each bound project runs its own copy of the code, with its own data)
     t3-workflow uninstall   remove them again
 
 From a clone without the command, `python install.py <action>` does the same.
@@ -33,7 +35,9 @@ import sys
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import health  # noqa: E402 - standard library only, like this file
+import homes  # noqa: E402
 import places  # noqa: E402
+import store  # noqa: E402
 import watcher  # noqa: E402
 STATE, SECRETS = places.STATE, places.SECRETS  # A clone's own state/, or ~/.t3-workflow for an installed copy.
 HOOK_SCRIPT = ROOT / "scripts" / "t3_hooks.py"
@@ -309,24 +313,78 @@ NEXT_STEPS = f"""Next steps:
      project". The binding starts paused."""
 
 
+def shared_bindings(state):
+    """(project id, workspace) of each binding still kept in the shared database, as before each project had its own copy."""
+    if not (Path(state) / "harness.sqlite3").exists():
+        return []
+    db = store.connect(Path(state) / "harness.sqlite3", readonly=True)
+    try:
+        return [(project, json.loads(config)["workspace"]) for project, config in db.execute("SELECT id, config FROM projects")]
+    finally:
+        db.close()
+
+
+def upgrade(state):
+    """Each binding still in the shared database moves into its own copy, and every copy's code becomes this version's.
+    A worker started before keeps working: the shared harness passes its reports on. Returns the lines to show and
+    whether every project made it; one that fails is named, and the others go on."""
+    lines, ok = [], True
+    for project, workspace in shared_bindings(state):
+        try:
+            home = homes.move(Path(state) / "harness.sqlite3", project, Path(state) / "homes", shared=Path(state).parent)
+            lines.append(f"{Path(workspace).name}: moved into its own folder {home}")
+        except Exception as error:  # Its binding stays in the shared data, served as before.
+            ok = False
+            lines.append(f"{Path(workspace).name}: not moved, it stays in the shared data: {type(error).__name__}: {error}")
+    for home, data in homes.listing(Path(state) / "homes"):
+        try:
+            if homes.upgrade(home):
+                lines.append(f"{Path(data['workspace']).name}: brought to this version")
+        except OSError as error:
+            ok = False
+            lines.append(f"{Path(data['workspace']).name}: not brought to this version: {error}")
+    return lines or ["Every project already has its own copy at this version."], ok
+
+
+def project_status(state):
+    """A status row per project: its own copy at this version, an older one, or still in the shared data."""
+    rows = [(f"{Path(workspace).name} is still in the shared data: run t3-workflow upgrade", False)
+            for _, workspace in shared_bindings(state)]
+    version = homes.fingerprint(ROOT)
+    for home, data in homes.listing(Path(state) / "homes"):
+        current = homes.fingerprint(home) == version
+        rows.append((f"{Path(data['workspace']).name}: its own copy, this version" if current else
+                     f"{Path(data['workspace']).name}: its own copy is an older version: run t3-workflow upgrade", current))
+    return rows
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["hook"]:  # t3-workflow hook <runtime> <hook>: what the installed hooks run.
         import t3_hooks
         return t3_hooks.main(argv[1:])
     parser = argparse.ArgumentParser(prog="t3-workflow", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("action", choices=["install", "status", "uninstall"])
+    parser.add_argument("action", choices=["install", "status", "upgrade", "uninstall"])
     parser.add_argument("--home", default=Path.home(), help=argparse.SUPPRESS)  # For tests.
     parser.add_argument("--dry-run", action="store_true", help="show which files would change")
     args = parser.parse_args(argv)
     installer = Installer(args.home, args.dry_run)
     if args.action == "status":
-        for name, ok in installer.status():
+        for name, ok in installer.status() + project_status(STATE):
             print(f"  [{'x' if ok else ' '}] {name}")
-        problems = health.problems(STATE, scanning=watcher.running(STATE))
-        for problem in problems:
-            print(f"  Problem: {problem['part']} failed {problem['failures']} times in a row since {problem['since']}: {problem['lastError']}")
+        problems = [(None, p) for p in health.problems(STATE, scanning=watcher.running(STATE))]
+        for home, data in homes.listing(STATE / "homes"):
+            problems += [(Path(data["workspace"]).name, p) for p in
+                         health.problems(home / "state", scanning=watcher.running(home / "state"))]
+        for name, problem in problems:
+            print(f"  Problem{f' in {name}' if name else ''}: {problem['part']} failed {problem['failures']} times in a row "
+                  f"since {problem['since']}: {problem['lastError']}")
         return 1 if problems else 0
+    if args.action == "upgrade":
+        lines, ok = upgrade(STATE)
+        for line in lines:
+            print(f"  {line}")
+        return 0 if ok else 1
     if args.action == "install":
         problems = requirements()
         for problem in problems:

@@ -93,7 +93,10 @@ In Codex's PowerShell, pipe a here-string instead, and keep the JSON ASCII (writ
 | `devops` | `false` merges without a DevOps worker (default `true`), from step 2 |
 
 The binding starts paused. If it says the project is already bound, point the user to its orchestrator
-thread and stop. From now on, your hook guards this thread as the orchestrator: in a workflow turn,
+thread and stop. `init` gives the project its own copy of the workflow, with its own data: its hooks,
+workers and watcher run that copy, so nothing another project's sessions run or change reaches it. Every
+T3 session of the project, in every turn, now stays inside the project's folder and worktrees. From now
+on, your hook guards this thread as the orchestrator: in a workflow turn,
 you can only read, use T3's tools, and run `t3-workflow`. On Codex, read with Get-Content,
 Get-ChildItem, rg or Select-String, one plain command without pipes or redirection.
 
