@@ -27,6 +27,10 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # each deploy gives the stylesheet, script and mark a new address, so a browser that kept the
+      # last copy (Pages lets it for ten minutes) fetches the new one on the next visit
+      - name: Stamp the asset links with this commit
+        run: sed -i "s/?v=dev/?v=${GITHUB_SHA::7}/g" site/index.html site/ar/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
