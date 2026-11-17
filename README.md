@@ -7,6 +7,9 @@ the exact commit it read, the orchestrator confirms it, and DevOps merges it thr
 and branch protection have the last word. You can turn DevOps off at setup or later; then the
 workflow merges confirmed PRs itself, with no model.
 
+Website: [mahmoud6901.github.io/t3-event-workflow](https://mahmoud6901.github.io/t3-event-workflow/)
+([العربية](https://mahmoud6901.github.io/t3-event-workflow/ar/)).
+
 ## Install (Windows, macOS, Linux)
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/) (or pipx), Git, the GitHub CLI (`gh`,

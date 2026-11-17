@@ -12,6 +12,10 @@ license = "MIT"
 license-files = ["LICENSE"]
 dependencies = []  # Standard library only.
 
+[project.urls]
+Homepage = "https://mahmoud6901.github.io/t3-event-workflow/"
+Repository = "https://github.com/Mahmoud6901/t3-event-workflow"
+
 [project.scripts]
 t3-workflow = "t3_workflow.install:main"
 
