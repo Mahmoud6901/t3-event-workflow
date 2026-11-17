@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="T3 event workflow">
+  <rect width="64" height="64" rx="14" fill="#346bf1"/>
+  <g fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 19v26"/>
+    <path d="M22 26c0 9 6 11 16 11"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="22" cy="17" r="5.5"/>
+    <circle cx="22" cy="47" r="5.5"/>
+    <circle cx="43" cy="37" r="5.5"/>
+  </g>
+</svg>

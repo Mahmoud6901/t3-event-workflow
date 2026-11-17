@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T3 event workflow: خطّط في محادثة واحدة، وادمج تغييرات مُراجَعة</title>
+<meta name="description" content="سير عمل مجاني ومفتوح المصدر لـ T3 Code. تخطّط مع جلسة مُنسِّق واحدة، ويتولّى عمّال في الخلفية تنفيذ كل مهمة ومراجعتها ودمجها كطلب دمج على GitHub.">
+<meta property="og:title" content="T3 event workflow: خطّط في محادثة واحدة، وادمج تغييرات مُراجَعة">
+<meta property="og:description" content="تخطّط مع جلسة مُنسِّق واحدة في T3 Code، ويحوّل عمّال التنفيذ والمراجعة وDevOps كل مهمة إلى طلب دمج مُراجَع ومدموج.">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="ar_AR">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" type="image/svg+xml" href="../assets/mark.svg">
+<link rel="alternate" hreflang="en" href="https://mahmoud6901.github.io/t3-event-workflow/">
+<link rel="alternate" hreflang="ar" href="https://mahmoud6901.github.io/t3-event-workflow/ar/">
+<script>
+  // Dark is the default; a visitor's own choice of light is remembered on this device.
+  (function () {
+    var root = document.documentElement;
+    root.classList.add('js');
+    try {
+      var saved = localStorage.getItem('t3wf-theme');
+      if (saved === 'light' || saved === 'dark') root.dataset.theme = saved;
+    } catch (e) {}
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zain:wght@300;400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<script src="../main.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">انتقل إلى المحتوى</a>
+
+<header class="hero" id="top">
+  <nav class="nav" aria-label="الرئيسية">
+    <a class="wordmark" href="#top" lang="en" dir="ltr"><img src="../assets/mark.svg" width="32" height="32" alt="">T3 event workflow</a>
+    <div class="nav-right">
+      <ul class="nav-links">
+        <li><a class="link" href="#how">كيف يعمل</a></li>
+        <li><a class="link" href="#rule">قاعدة الدمج</a></li>
+        <li><a class="link" href="#questions">أسئلة</a></li>
+      </ul>
+      <a class="link lang-link" href="../" hreflang="en" lang="en">English</a>
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="التبديل إلى الوضع الفاتح" title="التبديل إلى الوضع الفاتح">
+        <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.6A8.2 8.2 0 0 1 9.4 4a8.2 8.2 0 1 0 10.6 10.6Z"/></svg>
+      </button>
+      <a class="repo-link" href="https://github.com/Mahmoud6901/t3-event-workflow" aria-label="الشيفرة المصدرية لـ T3 event workflow على GitHub" title="اعرض الشيفرة على GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.8a10.2 10.2 0 0 0-3.2 19.9c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.6 1 1.6 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.3-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .9-.3 2.8 1a9.6 9.6 0 0 1 5.1 0c1.9-1.3 2.8-1 2.8-1 .6 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10.2 10.2 0 0 0 12 1.8Z"/></svg></a>
+      <a class="button button-small" href="#install">تثبيت</a>
+    </div>
+  </nav>
+
+  <div class="hero-type">
+    <h1 class="hero-title lines">
+      <span class="line"><span data-line style="--i:0">خطّط في محادثة واحدة،</span></span>
+      <span class="line"><span data-line style="--i:1">وادمج تغييرات مُراجَعة</span></span>
+    </h1>
+    <p class="hero-sub" data-load style="--d:420ms">سير عمل لـ T3 Code: تخطّط مع جلسة مُنسِّق واحدة، ويتولّى عمّال في الخلفية تنفيذ كل مهمة ومراجعتها ودمجها كطلب دمج (Pull Request) على GitHub.</p>
+    <a class="button hero-action" data-load style="--d:520ms" href="#install">ثبّته الآن</a>
+    <p class="hero-note" data-load style="--d:600ms">مجاني ومفتوح المصدر · <bdi>MIT</bdi> · <bdi class="nw">Python 3.11+</bdi></p>
+  </div>
+
+  <figure class="hero-window" data-open>
+    <div class="window" data-ui dir="ltr" lang="en">
+      <div class="window-bar" aria-hidden="true"><img src="../assets/mark.svg" width="16" height="16" alt=""><span>acme/shop · Orchestrator</span><span class="window-ctl"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg><svg viewBox="0 0 10 10"><path d="M.5.5h9v9h-9z"/></svg><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></svg></span></div>
+      <div class="app" data-replay>
+        <div class="app-side">
+          <p class="side-head">acme/shop</p>
+          <ul class="side-threads">
+            <li class="th is-active"><span class="th-name">Orchestrator</span><span class="th-meta">Plan M30</span></li>
+            <li class="th" data-th="impl"><span class="th-dot is-done"></span><span class="th-name">Fix the login typo</span><span class="th-meta">Implementer · PR #41</span></li>
+            <li class="th" data-th="review"><span class="th-dot is-done"></span><span class="th-name">Review #41</span><span class="th-meta">Reviewer · approved</span></li>
+            <li class="th is-on" data-th="ops" data-at="2"><span class="th-dot is-done" data-swap="is-working is-done"></span><span class="th-name">DevOps M30</span><span class="th-meta"><span class="th-was">Merging #41</span><span class="th-now">Merged #41</span></span></li>
+            <li class="th is-on" data-th="next" data-at="4"><span class="th-dot is-working" data-swap="is-waiting is-working"></span><span class="th-name">Add the login test</span><span class="th-meta"><span class="th-was">Waits for #41</span><span class="th-now">Implementer · working</span></span></li>
+          </ul>
+        </div>
+        <div class="app-thread">
+          <div class="msg msg-you" data-step="0"><p>use t3 workflow: fix the login typo, then add a test for it</p></div>
+          <div class="msg msg-orch" data-step="1"><p>Plan M30 is written. <b>Fix the login typo</b> starts now, and <b>Add the login test</b> waits for it to merge.</p></div>
+          <p class="msg-event" data-step="2"><span class="ev-mark"></span>Delegated task “DevOps M30” [completed]</p>
+          <p class="msg-tool" data-step="3"><span>Ran</span> <code>t3-workflow '{"op":"next"}'</code></p>
+          <div class="msg msg-orch" data-step="4"><p><b>Fix the login typo</b> merged as #41 at a1b2c3d. <b>Add the login test</b> has started.</p></div>
+          <div class="composer"><span class="composer-ph">Reply to the orchestrator</span><span class="composer-model">Opus 5.5 · high</span><span class="composer-send"><svg viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></span></div>
+        </div>
+      </div>
+    </div>
+  </figure>
+</header>
+
+<main id="main" tabindex="-1">
+
+<section class="roles" id="roles" aria-labelledby="roles-title">
+  <h2 class="roles-title rise" id="roles-title" data-reveal><span class="line"><span>أربعة أدوار، تتحدث مع واحد منها</span></span></h2>
+  <p class="roles-lead" data-reveal style="--i:1">تتحدث مع جلسة واحدة هي المُنسِّق. ويعمل الباقي في الخلفية كمهام مفوَّضة في T3، وتنتهي كل مهمة بطلب دمج واحد تمّت مراجعته عند commit محدّد.</p>
+  <div class="roles-cols">
+    <p data-reveal style="--i:2"><b>المُنسِّق</b> يخطّط العمل معك ويطلعك على ما جرى. لا يعدّل شيئًا بنفسه: الـ hook الخاص به لا يسمح له إلا بتشغيل <code>t3-workflow</code>، فيصل كل تغيير إلى شيفرتك عبر عامل وطلب دمج. ويعمل على أي نموذج من Claude أو Codex تختاره في T3.</p>
+    <p data-reveal style="--i:3"><b>المُنفِّذ</b> يأخذ مهمة واحدة في نسخة T3 خاصة به، ولا يغيّر إلا مسارات تلك المهمة، ويشغّل فحوصات المشروع ويفتح طلب دمج واحدًا. وتعود إليه هو نفسه ملاحظات المراجعة والتعارضات وإخفاقات CI. افتراضيًا: <bdi class="nw">GPT-6.1-Sol</bdi> بمستوى xhigh.</p>
+    <p data-reveal style="--i:4"><b>المُراجِع</b> يقرأ طلب الدمج عند commit واحد ولا يغيّر شيئًا. يوافق على ذلك الـ commit بعينه عبر الحالة <code>t3/review</code>، أو يسرد كل ملاحظة مانعة مع ملفها وسطرها. افتراضيًا: <bdi class="nw">Sonnet 5.5</bdi> بمستوى xhigh.</p>
+    <p data-reveal style="--i:5"><b>DevOps</b> يحدّث كل طلب دمج مؤكَّد، وينتظر CI، ثم يدمجه بطريقة squash عبر GitHub. ويتولّى خط التكامل أيضًا ويصلحه في طلبات دمج خاصة به. وإن أوقفته، يدمج سير العمل دون أي نموذج. افتراضيًا: <bdi class="nw">Opus 5.5</bdi> بمستوى xhigh.</p>
+  </div>
+</section>
+
+<section class="status" id="status" aria-labelledby="status-title">
+  <h2 class="status-title rise" id="status-title" data-reveal><span class="line"><span>اعرف دائمًا</span></span><span class="line"><span>أين وصل العمل</span></span></h2>
+  <div class="status-board" data-notes>
+    <div class="notes notes-left">
+      <button type="button" class="note" data-part="binding" aria-pressed="false"><span class="note-name">الربط</span><span class="note-text">يبدأ متوقفًا. لا يبدأ العمل إلا حين تطلب تفعيله، ويمكنك إيقافه مؤقتًا أو استئنافه أو إنهاؤه.</span></button>
+      <button type="button" class="note" data-part="models" aria-pressed="false"><span class="note-name">نموذج كل دور</span><span class="note-text">اختيارك، وإلا فنصيحة Jev، وإلا فالافتراضي. غيّر النموذج أو مستوى الجهد بجملة واحدة.</span></button>
+      <button type="button" class="note" data-part="asks" aria-pressed="false"><span class="note-name">أسئلة موجّهة إليك</span><span class="note-text">الدمج خارج مسارات المهمة ينتظر إجابتك. والمُنسِّق لا يجيب نيابةً عنك أبدًا.</span></button>
+    </div>
+
+    <figure class="status-panel shutter" data-reveal>
+      <div class="panel" data-ui dir="ltr" lang="en">
+        <div class="panel-head" data-part="binding">
+          <p class="panel-title">Status</p>
+          <p class="panel-sub">acme/shop · main</p>
+          <span class="badge badge-ok"><i></i>Active</span>
+        </div>
+        <div class="panel-part" data-part="tasks">
+          <p class="part-name">Plan M30 · Login fixes</p>
+          <ul class="ui-rows">
+            <li style="--r:0"><span class="row-main">Fix the login typo</span><span class="state s-merged">merged</span><span class="row-side">#41</span></li>
+            <li style="--r:1"><span class="row-main">Add the login test</span><span class="state s-review">reviewing</span><span class="row-side">#42</span></li>
+            <li style="--r:2"><span class="row-main">Tidy the auth errors</span><span class="state s-ask">asking</span><span class="row-side">#43</span></li>
+            <li style="--r:3"><span class="row-main">Show the lockout message</span><span class="state s-work">implementing</span><span class="row-side"></span></li>
+          </ul>
+        </div>
+        <div class="panel-part" data-part="models">
+          <p class="part-name">Models</p>
+          <ul class="ui-rows">
+            <li style="--r:4"><span class="row-main">Implementer</span><span class="row-mid">GPT-6.1-Sol · xhigh</span><span class="row-side">Jev</span></li>
+            <li style="--r:5"><span class="row-main">Reviewer</span><span class="row-mid">Sonnet 5.5 · max</span><span class="row-side">Your pick</span></li>
+            <li style="--r:6"><span class="row-main">DevOps</span><span class="row-mid">Opus 5.5 · xhigh</span><span class="row-side">Default</span></li>
+          </ul>
+        </div>
+        <div class="panel-part" data-part="workers">
+          <p class="part-name">Working</p>
+          <ul class="ui-rows">
+            <li style="--r:7"><span class="row-main">Reviewer on #42</span><span class="row-mid"><i class="live"></i>reading</span><span class="row-side">6 min</span></li>
+            <li style="--r:8"><span class="row-main">Implementer, lockout</span><span class="row-mid"><i class="live"></i>working</span><span class="row-side">12 min</span></li>
+          </ul>
+        </div>
+        <div class="panel-part" data-part="asks">
+          <p class="part-name">Asks</p>
+          <div class="ask" style="--r:9">
+            <p><b>a7</b> · #43 changes src/api/client.ts, outside src/login/. Merge, back or drop?</p>
+            <span class="ask-opts"><span>merge</span><span>back</span><span>drop</span></span>
+          </div>
+        </div>
+        <div class="panel-part" data-part="problems">
+          <p class="part-name">Problems</p>
+          <p class="calm" style="--r:10"><i></i>None. Watcher, hooks, Jev and GitHub all answering.</p>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes notes-right">
+      <button type="button" class="note" data-part="tasks" aria-pressed="false"><span class="note-name">حالة كل مهمة</span><span class="note-text">من الانتظار حتى الدمج. والمهام التي لا تنتظر شيئًا تعمل في الوقت نفسه، بلا حدّ أقصى.</span></button>
+      <button type="button" class="note" data-part="workers" aria-pressed="false"><span class="note-name">من يعمل الآن</span><span class="note-text">يُنبّه المراقِبُ المُنسِّقَ إلى أي عامل يبقى صامتًا 30 دقيقة.</span></button>
+      <button type="button" class="note" data-part="problems" aria-pressed="false"><span class="note-name">المشكلات</span><span class="note-text">أي جزء في الخلفية يفشل ثلاث مرات متتالية، مع آخر خطأ له. ويختفي التنبيه عند نجاحه التالي.</span></button>
+    </div>
+  </div>
+</section>
+
+<section class="how" id="how" aria-labelledby="how-title" data-state="0">
+  <div class="how-copy">
+    <h2 class="how-title rise" id="how-title" data-reveal><span class="line"><span>من جملة واحدة</span></span><span class="line"><span>إلى دمج</span></span></h2>
+    <div class="how-step" data-step="0">
+      <h3>قل ما تريد إنجازه.</h3>
+      <p>يناقشه المُنسِّق معك، ثم يكتب الخطة: وصف كل مهمة، والمسارات التي يحقّ لها تغييرها، وما يجب دمجه أولًا.</p>
+    </div>
+    <div class="how-step" data-step="1">
+      <h3>ثم يتولّاه العمّال.</h3>
+      <p>يفتح المُنفِّذ طلب الدمج. ويقرؤه المُراجِع ويوافق على الـ commit الذي قرأه بعينه، عبر الحالة <code>t3/review</code> على ذلك الـ commit.</p>
+    </div>
+    <div class="how-step" data-step="2">
+      <h3>ويُدمج حين يتّفق الجميع.</h3>
+      <p>يحدّث DevOps الفرع، وينتظر CI، ثم يدمج بطريقة squash عبر GitHub. ويُبلغك المُنسِّق، فتبدأ المهام التي كانت تنتظره.</p>
+    </div>
+  </div>
+
+  <div class="how-stage">
+    <div class="stage-card" data-ui dir="ltr" lang="en">
+      <div class="state-view" data-view="0" data-ui dir="ltr" lang="en">
+        <p class="ui-title">Plan M30 · Login fixes</p>
+        <p class="ui-meta">Owns src/login/ · written with queue_set</p>
+        <ul class="plan-tasks">
+          <li><span class="pt-dot is-go"></span><span class="pt-name">Fix the login typo</span><span class="pt-when">Starts now</span></li>
+          <li><span class="pt-dot"></span><span class="pt-name">Add the login test</span><span class="pt-when">After Fix the login typo</span></li>
+          <li><span class="pt-dot is-go"></span><span class="pt-name">Show the lockout message</span><span class="pt-when">Starts now</span></li>
+        </ul>
+        <pre class="ui-code"><code>{"op":"queue_set","plans":[{"plan":"M30",
+ "owns":["src/login/"],"tasks":[
+  {"task":"Fix the login typo","brief":"…"},
+  {"task":"Add the login test","brief":"…",
+   "after":["Fix the login typo"]}]}]}</code></pre>
+      </div>
+
+      <div class="state-view" data-view="1" data-ui dir="ltr" lang="en">
+        <p class="ui-title">Fix the login typo <span class="ui-dim">#41</span></p>
+        <p class="ui-meta">t3/fix-login-typo into main · 1 commit · a1b2c3d</p>
+        <ul class="checks">
+          <li style="--c:0"><span class="ck"></span><span class="ck-name">tests</span><span class="ck-state"><span class="ck-run">Running</span><span class="ck-ok">Passed</span></span></li>
+          <li style="--c:1"><span class="ck"></span><span class="ck-name">lint</span><span class="ck-state"><span class="ck-run">Running</span><span class="ck-ok">Passed</span></span></li>
+          <li style="--c:2"><span class="ck"></span><span class="ck-name">t3/review</span><span class="ck-state"><span class="ck-run">Waiting</span><span class="ck-ok">Approved a1b2c3d</span></span></li>
+        </ul>
+        <div class="ui-comment">
+          <p class="ui-meta">Reviewer · comment</p>
+          <p>Checked the fix in src/login/form.ts and its new test. Nothing outside src/login/ changed. Approving a1b2c3d.</p>
+        </div>
+      </div>
+
+      <div class="state-view" data-view="2" data-ui dir="ltr" lang="en">
+        <p class="merged-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="13" r="2"/><path d="M7 8v8M7 9.5c0 3 3 3.5 8 3.5"/></svg>Merged</p>
+        <p class="ui-title">Squash-merged into main</p>
+        <p class="ui-meta">#41 · a1b2c3d became 9c0d4e2 · branch deleted</p>
+        <ul class="merge-facts">
+          <li>GitHub’s head guard merged exactly a1b2c3d</li>
+          <li>Required checks and t3/review green on an up-to-date branch</li>
+          <li>Your project folder fast-forwarded to 9c0d4e2</li>
+        </ul>
+        <div class="ui-tell">
+          <p class="ui-meta">Orchestrator</p>
+          <p><b>Fix the login typo</b> merged as #41. <b>Add the login test</b> has started.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="works" id="works" aria-labelledby="works-title">
+  <h2 class="works-title" id="works-title" data-reveal>يعمل مع ما تستخدمه</h2>
+  <ul class="works-names" lang="en">
+    <li data-reveal style="--i:1">T3 Code</li>
+    <li data-reveal style="--i:2">Claude Code</li>
+    <li data-reveal style="--i:3">Codex</li>
+    <li data-reveal style="--i:4">goose</li>
+    <li data-reveal style="--i:5">OpenRouter</li>
+    <li data-reveal style="--i:6">GitHub</li>
+  </ul>
+</section>
+
+<section class="rule" id="rule" aria-labelledby="rule-title">
+  <div class="rule-head">
+    <h2 class="rule-title rise" id="rule-title" data-reveal><span class="line"><span class="soft">لا دمج دون قراءة.</span></span><span class="line"><span>اختر ما حدث.</span></span></h2>
+    <a class="link rule-more" href="https://github.com/Mahmoud6901/t3-event-workflow/blob/main/references/protocol.md" data-reveal style="--i:1">اقرأ البروتوكول<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
+  </div>
+
+  <div class="rule-body" data-tabs>
+    <div class="rule-tabs" role="tablist" aria-label="ماذا حدث لطلب الدمج" data-reveal style="--i:2">
+      <button type="button" role="tab" id="tab-green" aria-controls="case-green" aria-selected="true"><span class="tab-name">كل شيء أخضر</span><span class="tab-note">موافَق عليه، والفحوصات ناجحة</span></button>
+      <button type="button" role="tab" id="tab-moved" aria-controls="case-moved" aria-selected="false" tabindex="-1"><span class="tab-name">commit جديد</span><span class="tab-note">دُفع بعد المراجعة</span></button>
+      <button type="button" role="tab" id="tab-paths" aria-controls="case-paths" aria-selected="false" tabindex="-1"><span class="tab-name">خارج مساراته</span><span class="tab-note">غيّر <bdi>src/api/</bdi></span></button>
+      <button type="button" role="tab" id="tab-failed" aria-controls="case-failed" aria-selected="false" tabindex="-1"><span class="tab-name">فشل فحص</span><span class="tab-note">على الـ commit الموافَق عليه</span></button>
+      <button type="button" role="tab" id="tab-behind" aria-controls="case-behind" aria-selected="false" tabindex="-1"><span class="tab-name">تقدّم main</span><span class="tab-note">الفرع متأخر عنه</span></button>
+    </div>
+
+    <div class="rule-cases" data-reveal style="--i:3">
+      <div class="case" role="tabpanel" id="case-green" aria-labelledby="tab-green" tabindex="0">
+        <h3 class="case-name">كل شيء أخضر</h3>
+        <ol class="bands">
+          <li class="band"><span class="b-state" lang="en">approved</span><span class="b-what"><b><bdi>t3/review</bdi> على <bdi>a1b2c3d</bdi></b><span>قرأ المُراجِع ذلك الـ commit ووافق عليه.</span></span><span class="b-who">المُراجِع</span></li>
+          <li class="band"><span class="b-state" lang="en">confirmed</span><span class="b-what"><b>القاعدة تؤكّده</b><span>ما زال رأس الفرع <bdi>a1b2c3d</bdi>، ولم يتغيّر إلا <bdi>src/login/</bdi>، ولم يفشل أي فحص مطلوب.</span></span><span class="b-who">سير العمل</span></li>
+          <li class="band"><span class="b-state" lang="en">merging</span><span class="b-what"><b>يحدّث DevOps الفرع</b><span>يحدّث GitHub الفرع. التغيير نفسه لم يتبدّل، فتنتقل الموافقة إلى الرأس الجديد.</span></span><span class="b-who">DevOps</span></li>
+          <li class="band"><span class="b-state" lang="en">merging</span><span class="b-what"><b>يعمل CI على الرأس الجديد</b><span>يجب أن ينجح كل فحص مطلوب و<bdi>t3/review</bdi> على فرع محدَّث.</span></span><span class="b-who">GitHub</span></li>
+          <li class="band is-end"><span class="b-state" lang="en">merged</span><span class="b-what"><b>دمج squash لذلك التغيير بعينه</b><span>يتحقّق حارس الرأس في GitHub من الـ commit، ويتقدّم مجلد مشروعك إليه مباشرة.</span></span><span class="b-who">DevOps</span></li>
+        </ol>
+        <p class="case-tell">يُبلغك المُنسِّق: دُمجت <bdi>Fix the login typo</bdi> باسم <bdi>#41</bdi>. وتبدأ المهام التي كانت تنتظرها.</p>
+      </div>
+
+      <div class="case" role="tabpanel" id="case-moved" aria-labelledby="tab-moved" tabindex="0">
+        <h3 class="case-name">commit جديد</h3>
+        <ol class="bands">
+          <li class="band"><span class="b-state" lang="en">approved</span><span class="b-what"><b><bdi>t3/review</bdi> على <bdi>a1b2c3d</bdi></b><span>قرأ المُراجِع ذلك الـ commit ووافق عليه.</span></span><span class="b-who">المُراجِع</span></li>
+          <li class="band"><span class="b-state" lang="en">implementing</span><span class="b-what"><b>انتقل الرأس إلى <bdi>7f3e2c1</bdi></b><span>لم يعد الـ commit الموافَق عليه هو الرأس، فتعود المهمة إلى مُنفِّذها.</span></span><span class="b-who">سير العمل</span></li>
+          <li class="band"><span class="b-state" lang="en">review_needed</span><span class="b-what"><b>يذهب الـ commit الجديد إلى المراجعة</b><span>تُشغَّل فحوصات المشروع من جديد في نسخة المُنفِّذ أولًا.</span></span><span class="b-who">المُنفِّذ</span></li>
+          <li class="band is-end"><span class="b-state" lang="en">reviewing</span><span class="b-what"><b>مراجعة ثانية تبدأ من الأولى</b><span>يذكر وصفها الحكم السابق، وسبب عودة طلب الدمج، والفرق منذ ذلك الحين.</span></span><span class="b-who">المُراجِع</span></li>
+        </ol>
+        <p class="case-tell">لا يُدمج أي commit لم يقرأه مُراجِع.</p>
+      </div>
+
+      <div class="case" role="tabpanel" id="case-paths" aria-labelledby="tab-paths" tabindex="0">
+        <h3 class="case-name">خارج مساراته</h3>
+        <ol class="bands">
+          <li class="band"><span class="b-state" lang="en">approved</span><span class="b-what"><b><bdi>t3/review</bdi> على <bdi>a1b2c3d</bdi></b><span>قرأ المُراجِع ذلك الـ commit ووافق عليه.</span></span><span class="b-who">المُراجِع</span></li>
+          <li class="band"><span class="b-state" lang="en">asking</span><span class="b-what"><b>طلب الدمج يغيّر <bdi>src/api/client.ts</bdi></b><span>هذا خارج <bdi>src/login/</bdi>، المسارات التي تملكها المهمة، فينتظر الدمج.</span></span><span class="b-who">سير العمل</span></li>
+          <li class="band"><span class="b-state" lang="en">asking</span><span class="b-what"><b>تجيب: <bdi>merge</bdi> أو <bdi>back</bdi> أو <bdi>drop</bdi></b><span>يطرح عليك المُنسِّق السؤال بمعرّفه، كما هو.</span></span><span class="b-who">أنت</span></li>
+          <li class="band is-end"><span class="b-state">قرارك</span><span class="b-what"><b>إجابتك هي الفيصل</b><span><bdi>merge</bdi> يؤكّده، و<bdi>back</bdi> يعيده إلى مُنفِّذه، و<bdi>drop</bdi> ينهي المهمة ويترك طلب الدمج مفتوحًا.</span></span><span class="b-who">سير العمل</span></li>
+        </ol>
+        <p class="case-tell">يبقى النطاق كما اتّفقتما، ما لم تقل غير ذلك.</p>
+      </div>
+
+      <div class="case" role="tabpanel" id="case-failed" aria-labelledby="tab-failed" tabindex="0">
+        <h3 class="case-name">فشل فحص</h3>
+        <ol class="bands">
+          <li class="band"><span class="b-state" lang="en">ci_failed</span><span class="b-what"><b>فشل فحص مطلوب</b><span>لا يمكن دمج المهمة. يقرأ DevOps التشغيل الفاشل ويحدّد مصدر الإخفاق.</span></span><span class="b-who">سير العمل</span></li>
+          <li class="band"><span class="b-state" lang="en">implementing</span><span class="b-what"><b>إن كانت شيفرة المهمة هي السبب</b><span>تعود إلى المُنفِّذ، مع الفحص الفاشل وسببه.</span></span><span class="b-who">DevOps</span></li>
+          <li class="band"><span class="b-state" lang="en">ci_failed</span><span class="b-what"><b>إن كان الاختبار متقلّبًا</b><span>يعيد DevOps تشغيل المهام الفاشلة مرة واحدة. والإخفاق الثاني يُحسب على خط التكامل.</span></span><span class="b-who">DevOps</span></li>
+          <li class="band is-end"><span class="b-state" lang="en">pipeline_wait</span><span class="b-what"><b>إن كان خط التكامل هو السبب</b><span>يصلح DevOps خط التكامل في طلب دمج خاص به، يُراجَع كأي مهمة. وتنتظره المهمة.</span></span><span class="b-who">DevOps</span></li>
+        </ol>
+        <p class="case-tell">حين يكون DevOps متوقفًا، يعود كل إخفاق في CI إلى المُنفِّذ.</p>
+      </div>
+
+      <div class="case" role="tabpanel" id="case-behind" aria-labelledby="tab-behind" tabindex="0">
+        <h3 class="case-name">تقدّم main</h3>
+        <ol class="bands">
+          <li class="band"><span class="b-state" lang="en">merging</span><span class="b-what"><b>يشغّل DevOps الأمر <bdi>worker update</bdi></b><span>يحدّث GitHub الفرع ليلحق بـ main.</span></span><span class="b-who">DevOps</span></li>
+          <li class="band"><span class="b-state" lang="en">merging</span><span class="b-what"><b>إن بقي تغيير المهمة كما هو</b><span>تنتقل الموافقة إلى الرأس الجديد، ويعمل CI عليه.</span></span><span class="b-who">سير العمل</span></li>
+          <li class="band"><span class="b-state" lang="en">implementing</span><span class="b-what"><b>إن تغيّر أو تعارض</b><span>يعود إلى المُنفِّذ، فيدمج main فيه ويحافظ على مقصد الطرفين. لا rebase ولا force-push أبدًا.</span></span><span class="b-who">المُنفِّذ</span></li>
+          <li class="band is-end"><span class="b-state" lang="en">review_needed</span><span class="b-what"><b>يُراجَع الرأس الجديد مرة أخرى</b><span>الموافقة تخصّ commit واحدًا، وهذا commit جديد.</span></span><span class="b-who">المُراجِع</span></li>
+        </ol>
+        <p class="case-tell">لا تنتقل الموافقة أبدًا إلى شيفرة لم يقرأها أحد.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="faq" id="questions" aria-labelledby="faq-title">
+  <h2 class="faq-title rise" id="faq-title" data-reveal><span class="line"><span>قبل</span></span><span class="line"><span>أن تثبّته</span></span></h2>
+  <div class="faq-list">
+    <details name="faq" data-reveal style="--i:1">
+      <summary>ما الذي أحتاجه قبل التثبيت؟</summary>
+      <div class="faq-answer"><p><bdi>Python 3.11</bdi> أو أحدث، و<a href="https://docs.astral.sh/uv/">uv</a> (أو pipx)، وGit، وواجهة GitHub CLI مع تسجيل الدخول فيها، و<a href="https://github.com/pingdotgg/t3code">T3 Code</a> مع تسجيل الدخول في Claude أو Codex أو goose. يعمل المُنسِّق على Claude Code أو Codex، لذا يجب أن يكون أحدهما في PATH.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:2">
+      <summary>هل يعمل على macOS وLinux؟</summary>
+      <div class="faq-answer"><p>جُرّب حتى الآن على Windows فقط. على macOS يبدأ المراقِب كـ LaunchAgent، وعلى Linux كوحدة systemd للمستخدم. كلاهما مغطّى بالاختبارات، لكن لم يُجرَّب بعد بتسجيل دخول حقيقي، ونرحّب بتقاريركم.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:3">
+      <summary>هل يمكن لعامل أن يدفع مباشرة إلى main؟</summary>
+      <div class="faq-answer"><p>لا. يحمي الإعدادُ الفرع: يلزم طلب دمج، مع نجاح فحوصات CI و<code>t3/review</code> على فرع محدَّث، حتى للمسؤولين، ودون force-push. ولا يدمج DevOps إلا عبر <code>worker merge</code>، الذي يدمج بطريقة squash الـ commit الموافَق عليه بعينه.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:4">
+      <summary>هل عليّ استخدام عامل DevOps؟</summary>
+      <div class="faq-answer"><p>لا. أوقفه عند الإعداد، أو لاحقًا بقول «<bdi class="nw">use t3 workflow: turn DevOps off</bdi>». عندها يحدّث سير العمل بنفسه كل طلب دمج مؤكَّد، وينتظر CI ويدمجه، دون أي نموذج. ويعود كل إخفاق في CI إلى المُنفِّذ.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:5">
+      <summary>ما النماذج التي يستخدمها العمّال؟</summary>
+      <div class="faq-answer"><p>تختار نموذج كل دور ومستوى جهده، كلًّا على حدة، عند الإعداد أو لاحقًا. وما تتركه دون اختيار قد يقترح Jev نموذجه للمُنفِّذ أو المُراجِع. وإلا فالافتراضيات: <bdi class="nw">GPT-6.1-Sol</bdi> للمُنفِّذين، و<bdi class="nw">Sonnet 5.5</bdi> للمُراجِعين، و<bdi class="nw">Opus 5.5</bdi> لـ DevOps، وكلها بمستوى xhigh. ويتحقّق الإعداد من النماذج التي يستطيع T3 لديك تشغيلها.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:6">
+      <summary>ما هو Jev، وهل أحتاجه؟</summary>
+      <div class="faq-answer"><p>Jev مستشار اختياري لاختيار النماذج. ضع مفتاح TypeSafe في سطر واحد داخل <code>~/.t3-workflow/secrets/typesafe-api-key.txt</code>، أو اضبط <code>TYPESAFE_API_KEY</code>. ومن دونه، تستخدم كل مهمة النماذج التي اخترتها أو الافتراضية.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:7">
+      <summary>ما الذي يغيّره المُثبِّت على جهازي؟</summary>
+      <div class="faq-answer"><p>يضيف hooks في إعدادات Claude Code وCodex، وكتلة مُعلَّمة في <code>CLAUDE.md</code> و<code>AGENTS.md</code>، ونماذج goose في إعدادات T3، ومراقِبًا يبدأ عند تسجيل دخولك. ويحفظ نسخة احتياطية من كل ملف قبل تعديله، ويزيل <code>t3-workflow uninstall</code> ذلك كله.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:8">
+      <summary>هل يستحوذ على كل جلسة؟</summary>
+      <div class="faq-answer"><p>لا. سير العمل اختياري: لا يعمل إلا حين تتضمّن رسالتك «<bdi>use t3 workflow</bdi>»، وحين يُوقَظ المُنسِّق تلقائيًا. وأي رسالة أخرى تحصل على إجابة عادية، حتى في محادثة مربوطة.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:9">
+      <summary>مشروعي ليس فيه CI بعد. هل يمكنني استخدامه؟</summary>
+      <div class="faq-answer"><p>نعم. يصبح CI أول خطة: مهمة واحدة تضيف سير عمل طلبات الدمج، ويصبح اسم مهمّته هو الفحص المطلوب. ويبقى النشر في وضع الانتظار حتى تحدّد خادمًا.</p></div>
+    </details>
+  </div>
+</section>
+
+<section class="close" id="install" aria-labelledby="close-title">
+  <div class="close-copy">
+    <h2 class="close-title rise" id="close-title" data-reveal><span class="line"><span>ثبّته،</span></span><span class="line"><span>ثم قُل الجملة</span></span></h2>
+    <p class="close-text" data-reveal style="--i:1">أمران يثبّتانه. ثم في مشروع T3 على GitHub، قل «<bdi class="nw">use t3 workflow: set up this project</bdi>»، فتصبح تلك الجلسة هي المُنسِّق، متوقفة حتى تفعّلها.</p>
+  </div>
+
+  <div class="setup shutter" data-reveal style="--i:1">
+    <div class="window setup-window" data-ui>
+      <div class="window-bar" aria-hidden="true" dir="ltr" lang="en"><span class="bar-term">&gt;_</span><span>Terminal</span><span class="window-ctl"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg><svg viewBox="0 0 10 10"><path d="M.5.5h9v9h-9z"/></svg><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></svg></span></div>
+      <div class="setup-body">
+        <div class="setup-choice" role="group" aria-label="التثبيت باستخدام" dir="ltr" lang="en">
+          <button type="button" class="seg" data-tool="uv" aria-pressed="true">uv</button>
+          <button type="button" class="seg" data-tool="pipx" aria-pressed="false">pipx</button>
+        </div>
+        <ol class="cmds" dir="ltr">
+          <li class="cmd"><pre lang="en"><code data-cmd="install"><span>uv</span> <span>tool</span> <span>install</span> <span>git+https://</span><wbr><span>github.com/</span><wbr><span>Mahmoud6901/</span><wbr><span>t3-event-workflow</span></code></pre><button type="button" class="copy" data-copy="install">نسخ</button></li>
+          <li class="cmd"><pre lang="en"><code data-cmd="setup">t3-workflow install</code></pre><button type="button" class="copy" data-copy="setup">نسخ</button></li>
+        </ol>
+        <p class="setup-out" aria-hidden="true"><span class="ok-dot"></span>تمّ التثبيت. أغلق T3 Code وأعد فتحه.</p>
+        <div class="setup-say">
+          <p class="say-label">ثم، في مشروع T3 على GitHub</p>
+          <p class="say-line" dir="ltr" lang="en">use t3 workflow: set up this project</p>
+        </div>
+        <button type="button" class="button setup-copy" data-copy="all">انسخ الأمرين</button>
+        <p class="copy-status" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer" aria-label="عن هذا المشروع">
+  <div class="tile tile-about" data-reveal>
+    <p class="tile-statement">أدِر مشروع GitHub في T3 Code عبر جلسة واحدة.</p>
+    <p class="tile-small">رخصة MIT. ‏T3 Code وClaude وCodex وgoose وOpenRouter وGitHub مملوكة لأصحابها، وسير العمل هذا مستقل عنها.</p>
+  </div>
+  <nav class="tile tile-nav" aria-label="الصفحة" data-reveal style="--i:1">
+    <ul>
+      <li><a class="link" href="#how">كيف يعمل</a></li>
+      <li><a class="link" href="#rule">قاعدة الدمج</a></li>
+      <li><a class="link" href="#questions">أسئلة</a></li>
+      <li><a class="link" href="#install">التثبيت</a></li>
+      <li><a class="link" href="../" hreflang="en" lang="en">English</a></li>
+    </ul>
+  </nav>
+  <div class="tile tile-version" data-reveal style="--i:2">
+    <p class="tile-big">الإصدار <bdi>0.4.0</bdi></p>
+    <p><bdi class="nw">Python 3.11+</bdi>، المكتبة القياسية فقط</p>
+  </div>
+  <a class="tile tile-issue" href="https://github.com/Mahmoud6901/t3-event-workflow/issues/new" data-reveal style="--i:3">
+    <p>وجدت مشكلة؟</p>
+    <p class="tile-big">افتح بلاغًا</p>
+  </a>
+  <a class="tile tile-name" href="#top" aria-label="العودة إلى الأعلى" data-reveal style="--i:4"><span lang="en" dir="ltr">T3 event workflow</span></a>
+  <a class="tile tile-go" href="https://github.com/Mahmoud6901/t3-event-workflow" data-reveal style="--i:5">
+    <span class="go-text">اقرأ الشيفرة المصدرية</span>
+    <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M12 36 36 12M16 12h20v20"/></svg>
+  </a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.3.26/dist/lenis.min.js" defer></script>
+</body>
+</html>

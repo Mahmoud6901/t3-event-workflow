@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T3 event workflow: plan in one thread, ship reviewed PRs</title>
+<meta name="description" content="A free, open-source workflow for T3 Code. You plan with one orchestrator session, and background workers implement, review and merge each task as a GitHub pull request.">
+<meta property="og:title" content="T3 event workflow: plan in one thread, ship reviewed PRs">
+<meta property="og:description" content="You plan with one orchestrator session in T3 Code. Implementer, reviewer and DevOps workers turn each task into a reviewed, merged pull request.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" type="image/svg+xml" href="assets/mark.svg">
+<link rel="alternate" hreflang="en" href="https://mahmoud6901.github.io/t3-event-workflow/">
+<link rel="alternate" hreflang="ar" href="https://mahmoud6901.github.io/t3-event-workflow/ar/">
+<script>
+  // Dark is the default; a visitor's own choice of light is remembered on this device.
+  (function () {
+    var root = document.documentElement;
+    root.classList.add('js');
+    try {
+      var saved = localStorage.getItem('t3wf-theme');
+      if (saved === 'light' || saved === 'dark') root.dataset.theme = saved;
+    } catch (e) {}
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zain:wght@300;400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="main.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="hero" id="top">
+  <nav class="nav" aria-label="Main">
+    <a class="wordmark" href="#top"><img src="assets/mark.svg" width="32" height="32" alt="">T3 event workflow</a>
+    <div class="nav-right">
+      <ul class="nav-links">
+        <li><a class="link" href="#how">How it works</a></li>
+        <li><a class="link" href="#rule">The merge rule</a></li>
+        <li><a class="link" href="#questions">Questions</a></li>
+      </ul>
+      <a class="link lang-link" href="ar/" hreflang="ar" lang="ar">العربية</a>
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to the light theme" title="Switch to the light theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.6A8.2 8.2 0 0 1 9.4 4a8.2 8.2 0 1 0 10.6 10.6Z"/></svg>
+      </button>
+      <a class="repo-link" href="https://github.com/Mahmoud6901/t3-event-workflow" aria-label="T3 event workflow source code on GitHub" title="View source on GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.8a10.2 10.2 0 0 0-3.2 19.9c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.6 1 1.6 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.3-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .9-.3 2.8 1a9.6 9.6 0 0 1 5.1 0c1.9-1.3 2.8-1 2.8-1 .6 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10.2 10.2 0 0 0 12 1.8Z"/></svg></a>
+      <a class="button button-small" href="#install">Install</a>
+    </div>
+  </nav>
+
+  <div class="hero-type">
+    <h1 class="hero-title lines">
+      <span class="line"><span data-line style="--i:0">Plan in one thread,</span></span>
+      <span class="line"><span data-line style="--i:1">ship reviewed PRs</span></span>
+    </h1>
+    <p class="hero-sub" data-load style="--d:420ms">A workflow for T3 Code: you plan with one orchestrator session, and background workers implement, review and merge each task as a GitHub pull request.</p>
+    <a class="button hero-action" data-load style="--d:520ms" href="#install">Install it</a>
+    <p class="hero-note" data-load style="--d:600ms">Free and open source · MIT · Python 3.11+</p>
+  </div>
+
+  <figure class="hero-window" data-open>
+    <div class="window" data-ui>
+      <div class="window-bar" aria-hidden="true"><img src="assets/mark.svg" width="16" height="16" alt=""><span>acme/shop · Orchestrator</span><span class="window-ctl"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg><svg viewBox="0 0 10 10"><path d="M.5.5h9v9h-9z"/></svg><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></svg></span></div>
+      <div class="app" data-replay>
+        <div class="app-side">
+          <p class="side-head">acme/shop</p>
+          <ul class="side-threads">
+            <li class="th is-active"><span class="th-name">Orchestrator</span><span class="th-meta">Plan M30</span></li>
+            <li class="th" data-th="impl"><span class="th-dot is-done"></span><span class="th-name">Fix the login typo</span><span class="th-meta">Implementer · PR #41</span></li>
+            <li class="th" data-th="review"><span class="th-dot is-done"></span><span class="th-name">Review #41</span><span class="th-meta">Reviewer · approved</span></li>
+            <li class="th is-on" data-th="ops" data-at="2"><span class="th-dot is-done" data-swap="is-working is-done"></span><span class="th-name">DevOps M30</span><span class="th-meta"><span class="th-was">Merging #41</span><span class="th-now">Merged #41</span></span></li>
+            <li class="th is-on" data-th="next" data-at="4"><span class="th-dot is-working" data-swap="is-waiting is-working"></span><span class="th-name">Add the login test</span><span class="th-meta"><span class="th-was">Waits for #41</span><span class="th-now">Implementer · working</span></span></li>
+          </ul>
+        </div>
+        <div class="app-thread">
+          <div class="msg msg-you" data-step="0"><p>use t3 workflow: fix the login typo, then add a test for it</p></div>
+          <div class="msg msg-orch" data-step="1"><p>Plan M30 is written. <b>Fix the login typo</b> starts now, and <b>Add the login test</b> waits for it to merge.</p></div>
+          <p class="msg-event" data-step="2"><span class="ev-mark"></span>Delegated task “DevOps M30” [completed]</p>
+          <p class="msg-tool" data-step="3"><span>Ran</span> <code>t3-workflow '{"op":"next"}'</code></p>
+          <div class="msg msg-orch" data-step="4"><p><b>Fix the login typo</b> merged as #41 at a1b2c3d. <b>Add the login test</b> has started.</p></div>
+          <div class="composer"><span class="composer-ph">Reply to the orchestrator</span><span class="composer-model">Opus 5.5 · high</span><span class="composer-send"><svg viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></span></div>
+        </div>
+      </div>
+    </div>
+  </figure>
+</header>
+
+<main id="main" tabindex="-1">
+
+<section class="roles" id="roles" aria-labelledby="roles-title">
+  <h2 class="roles-title rise" id="roles-title" data-reveal><span class="line"><span>Four roles, one you talk to</span></span></h2>
+  <p class="roles-lead" data-reveal style="--i:1">You talk to one session, the orchestrator. The rest runs in the background as T3 delegated tasks, and every task ends as one pull request, reviewed at an exact commit.</p>
+  <div class="roles-cols">
+    <p data-reveal style="--i:2"><b>The orchestrator</b> plans the work with you and reports back. It edits nothing: its hook lets it run only <code>t3-workflow</code>, so every change reaches your code through a worker and a pull request. It runs on any Claude or Codex model you pick in T3.</p>
+    <p data-reveal style="--i:3"><b>An implementer</b> takes one task in its own T3 checkout, changes only that task’s paths, runs the project’s checks and opens one pull request. Review notes, conflicts and CI failures come back to the same implementer. By default, <span class="nw">GPT-6.1-Sol</span> at xhigh.</p>
+    <p data-reveal style="--i:4"><b>A reviewer</b> reads the pull request at one commit and changes nothing. It approves that exact commit with the <code>t3/review</code> status, or lists each blocking finding with its file and line. By default, <span class="nw">Sonnet 5.5</span> at xhigh.</p>
+    <p data-reveal style="--i:5"><b>DevOps</b> brings each confirmed pull request up to date, waits for CI and squash-merges it through GitHub. It owns the pipeline too, and fixes it in PRs of its own. Turn it off and the workflow merges with no model. By default, <span class="nw">Opus 5.5</span> at xhigh.</p>
+  </div>
+</section>
+
+<section class="status" id="status" aria-labelledby="status-title">
+  <h2 class="status-title rise" id="status-title" data-reveal><span class="line"><span>Always know</span></span><span class="line"><span>where it stands</span></span></h2>
+  <div class="status-board" data-notes>
+    <div class="notes notes-left">
+      <button type="button" class="note" data-part="binding" aria-pressed="false"><span class="note-name">The binding</span><span class="note-text">Starts paused. Work begins only when you say to activate it, and you can pause, resume or stop it.</span></button>
+      <button type="button" class="note" data-part="models" aria-pressed="false"><span class="note-name">Each role’s model</span><span class="note-text">Your pick, else Jev’s advice, else the default. Change a model or an effort with one sentence.</span></button>
+      <button type="button" class="note" data-part="asks" aria-pressed="false"><span class="note-name">Questions for you</span><span class="note-text">A merge outside a task’s paths waits for your answer. The orchestrator never answers for you.</span></button>
+    </div>
+
+    <figure class="status-panel shutter" data-reveal>
+      <div class="panel" data-ui>
+        <div class="panel-head" data-part="binding">
+          <p class="panel-title">Status</p>
+          <p class="panel-sub">acme/shop · main</p>
+          <span class="badge badge-ok"><i></i>Active</span>
+        </div>
+        <div class="panel-part" data-part="tasks">
+          <p class="part-name">Plan M30 · Login fixes</p>
+          <ul class="ui-rows">
+            <li style="--r:0"><span class="row-main">Fix the login typo</span><span class="state s-merged">merged</span><span class="row-side">#41</span></li>
+            <li style="--r:1"><span class="row-main">Add the login test</span><span class="state s-review">reviewing</span><span class="row-side">#42</span></li>
+            <li style="--r:2"><span class="row-main">Tidy the auth errors</span><span class="state s-ask">asking</span><span class="row-side">#43</span></li>
+            <li style="--r:3"><span class="row-main">Show the lockout message</span><span class="state s-work">implementing</span><span class="row-side"></span></li>
+          </ul>
+        </div>
+        <div class="panel-part" data-part="models">
+          <p class="part-name">Models</p>
+          <ul class="ui-rows">
+            <li style="--r:4"><span class="row-main">Implementer</span><span class="row-mid">GPT-6.1-Sol · xhigh</span><span class="row-side">Jev</span></li>
+            <li style="--r:5"><span class="row-main">Reviewer</span><span class="row-mid">Sonnet 5.5 · max</span><span class="row-side">Your pick</span></li>
+            <li style="--r:6"><span class="row-main">DevOps</span><span class="row-mid">Opus 5.5 · xhigh</span><span class="row-side">Default</span></li>
+          </ul>
+        </div>
+        <div class="panel-part" data-part="workers">
+          <p class="part-name">Working</p>
+          <ul class="ui-rows">
+            <li style="--r:7"><span class="row-main">Reviewer on #42</span><span class="row-mid"><i class="live"></i>reading</span><span class="row-side">6 min</span></li>
+            <li style="--r:8"><span class="row-main">Implementer, lockout</span><span class="row-mid"><i class="live"></i>working</span><span class="row-side">12 min</span></li>
+          </ul>
+        </div>
+        <div class="panel-part" data-part="asks">
+          <p class="part-name">Asks</p>
+          <div class="ask" style="--r:9">
+            <p><b>a7</b> · #43 changes src/api/client.ts, outside src/login/. Merge, back or drop?</p>
+            <span class="ask-opts"><span>merge</span><span>back</span><span>drop</span></span>
+          </div>
+        </div>
+        <div class="panel-part" data-part="problems">
+          <p class="part-name">Problems</p>
+          <p class="calm" style="--r:10"><i></i>None. Watcher, hooks, Jev and GitHub all answering.</p>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes notes-right">
+      <button type="button" class="note" data-part="tasks" aria-pressed="false"><span class="note-name">Every task’s state</span><span class="note-text">From waiting to merged. Tasks with nothing to wait for run at the same time, with no cap.</span></button>
+      <button type="button" class="note" data-part="workers" aria-pressed="false"><span class="note-name">Who is working</span><span class="note-text">The watcher tells the orchestrator about a worker that stays quiet for 30 minutes.</span></button>
+      <button type="button" class="note" data-part="problems" aria-pressed="false"><span class="note-name">Problems</span><span class="note-text">Any background part that fails three times in a row, with its last error. Its next success clears it.</span></button>
+    </div>
+  </div>
+</section>
+
+<section class="how" id="how" aria-labelledby="how-title" data-state="0">
+  <div class="how-copy">
+    <h2 class="how-title rise" id="how-title" data-reveal><span class="line"><span>From a sentence</span></span><span class="line"><span>to a merge</span></span></h2>
+    <div class="how-step" data-step="0">
+      <h3>Say what you want done.</h3>
+      <p>The orchestrator talks it through with you, then writes the plan: each task’s brief, the paths it may change, and what must merge first.</p>
+    </div>
+    <div class="how-step" data-step="1">
+      <h3>Then workers take it.</h3>
+      <p>An implementer opens the pull request. A reviewer reads it and approves the exact commit it read, as the <code>t3/review</code> status on that commit.</p>
+    </div>
+    <div class="how-step" data-step="2">
+      <h3>It merges when all agree.</h3>
+      <p>DevOps updates the branch, waits for CI and squash-merges through GitHub. The orchestrator tells you, and the tasks waiting on it start.</p>
+    </div>
+  </div>
+
+  <div class="how-stage">
+    <div class="stage-card" data-ui>
+      <div class="state-view" data-view="0" data-ui>
+        <p class="ui-title">Plan M30 · Login fixes</p>
+        <p class="ui-meta">Owns src/login/ · written with queue_set</p>
+        <ul class="plan-tasks">
+          <li><span class="pt-dot is-go"></span><span class="pt-name">Fix the login typo</span><span class="pt-when">Starts now</span></li>
+          <li><span class="pt-dot"></span><span class="pt-name">Add the login test</span><span class="pt-when">After Fix the login typo</span></li>
+          <li><span class="pt-dot is-go"></span><span class="pt-name">Show the lockout message</span><span class="pt-when">Starts now</span></li>
+        </ul>
+        <pre class="ui-code"><code>{"op":"queue_set","plans":[{"plan":"M30",
+ "owns":["src/login/"],"tasks":[
+  {"task":"Fix the login typo","brief":"…"},
+  {"task":"Add the login test","brief":"…",
+   "after":["Fix the login typo"]}]}]}</code></pre>
+      </div>
+
+      <div class="state-view" data-view="1" data-ui>
+        <p class="ui-title">Fix the login typo <span class="ui-dim">#41</span></p>
+        <p class="ui-meta">t3/fix-login-typo into main · 1 commit · a1b2c3d</p>
+        <ul class="checks">
+          <li style="--c:0"><span class="ck"></span><span class="ck-name">tests</span><span class="ck-state"><span class="ck-run">Running</span><span class="ck-ok">Passed</span></span></li>
+          <li style="--c:1"><span class="ck"></span><span class="ck-name">lint</span><span class="ck-state"><span class="ck-run">Running</span><span class="ck-ok">Passed</span></span></li>
+          <li style="--c:2"><span class="ck"></span><span class="ck-name">t3/review</span><span class="ck-state"><span class="ck-run">Waiting</span><span class="ck-ok">Approved a1b2c3d</span></span></li>
+        </ul>
+        <div class="ui-comment">
+          <p class="ui-meta">Reviewer · comment</p>
+          <p>Checked the fix in src/login/form.ts and its new test. Nothing outside src/login/ changed. Approving a1b2c3d.</p>
+        </div>
+      </div>
+
+      <div class="state-view" data-view="2" data-ui>
+        <p class="merged-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="13" r="2"/><path d="M7 8v8M7 9.5c0 3 3 3.5 8 3.5"/></svg>Merged</p>
+        <p class="ui-title">Squash-merged into main</p>
+        <p class="ui-meta">#41 · a1b2c3d became 9c0d4e2 · branch deleted</p>
+        <ul class="merge-facts">
+          <li>GitHub’s head guard merged exactly a1b2c3d</li>
+          <li>Required checks and t3/review green on an up-to-date branch</li>
+          <li>Your project folder fast-forwarded to 9c0d4e2</li>
+        </ul>
+        <div class="ui-tell">
+          <p class="ui-meta">Orchestrator</p>
+          <p><b>Fix the login typo</b> merged as #41. <b>Add the login test</b> has started.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="works" id="works" aria-labelledby="works-title">
+  <h2 class="works-title" id="works-title" data-reveal>Runs on what you use</h2>
+  <ul class="works-names">
+    <li data-reveal style="--i:1">T3 Code</li>
+    <li data-reveal style="--i:2">Claude Code</li>
+    <li data-reveal style="--i:3">Codex</li>
+    <li data-reveal style="--i:4">goose</li>
+    <li data-reveal style="--i:5">OpenRouter</li>
+    <li data-reveal style="--i:6">GitHub</li>
+  </ul>
+</section>
+
+<section class="rule" id="rule" aria-labelledby="rule-title">
+  <div class="rule-head">
+    <h2 class="rule-title rise" id="rule-title" data-reveal><span class="line"><span class="soft">Nothing merges unread.</span></span><span class="line"><span>Pick what happened.</span></span></h2>
+    <a class="link rule-more" href="https://github.com/Mahmoud6901/t3-event-workflow/blob/main/references/protocol.md" data-reveal style="--i:1">Read the protocol<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
+  </div>
+
+  <div class="rule-body" data-tabs>
+    <div class="rule-tabs" role="tablist" aria-label="What happened to the pull request" data-reveal style="--i:2">
+      <button type="button" role="tab" id="tab-green" aria-controls="case-green" aria-selected="true"><span class="tab-name">All green</span><span class="tab-note">Approved, checks pass</span></button>
+      <button type="button" role="tab" id="tab-moved" aria-controls="case-moved" aria-selected="false" tabindex="-1"><span class="tab-name">A new commit</span><span class="tab-note">Pushed after review</span></button>
+      <button type="button" role="tab" id="tab-paths" aria-controls="case-paths" aria-selected="false" tabindex="-1"><span class="tab-name">Outside its paths</span><span class="tab-note">It changed src/api/</span></button>
+      <button type="button" role="tab" id="tab-failed" aria-controls="case-failed" aria-selected="false" tabindex="-1"><span class="tab-name">A check failed</span><span class="tab-note">On the approved commit</span></button>
+      <button type="button" role="tab" id="tab-behind" aria-controls="case-behind" aria-selected="false" tabindex="-1"><span class="tab-name">Main moved on</span><span class="tab-note">The branch is behind</span></button>
+    </div>
+
+    <div class="rule-cases" data-reveal style="--i:3">
+      <div class="case" role="tabpanel" id="case-green" aria-labelledby="tab-green" tabindex="0">
+        <h3 class="case-name">All green</h3>
+        <ol class="bands">
+          <li class="band"><span class="b-state">approved</span><span class="b-what"><b>t3/review is on a1b2c3d</b><span>The reviewer read that commit and approved it.</span></span><span class="b-who">Reviewer</span></li>
+          <li class="band"><span class="b-state">confirmed</span><span class="b-what"><b>The rule confirms it</b><span>The head is still a1b2c3d, only src/login/ changed, and no required check failed.</span></span><span class="b-who">Harness</span></li>
+          <li class="band"><span class="b-state">merging</span><span class="b-what"><b>DevOps brings it up to date</b><span>GitHub updates the branch. The change is the same, so the approval carries to the new head.</span></span><span class="b-who">DevOps</span></li>
+          <li class="band"><span class="b-state">merging</span><span class="b-what"><b>CI runs on the new head</b><span>Every required check and t3/review must be green on an up-to-date branch.</span></span><span class="b-who">GitHub</span></li>
+          <li class="band is-end"><span class="b-state">merged</span><span class="b-what"><b>Squash-merged, exactly that change</b><span>GitHub’s head guard checks the commit; your project folder fast-forwards.</span></span><span class="b-who">DevOps</span></li>
+        </ol>
+        <p class="case-tell">You hear: “Fix the login typo merged as #41.” Tasks waiting on it start.</p>
+      </div>
+
+      <div class="case" role="tabpanel" id="case-moved" aria-labelledby="tab-moved" tabindex="0">
+        <h3 class="case-name">A new commit</h3>
+        <ol class="bands">
+          <li class="band"><span class="b-state">approved</span><span class="b-what"><b>t3/review is on a1b2c3d</b><span>The reviewer read that commit and approved it.</span></span><span class="b-who">Reviewer</span></li>
+          <li class="band"><span class="b-state">implementing</span><span class="b-what"><b>The head moved to 7f3e2c1</b><span>The approved commit is no longer the head, so the task goes back to its implementer.</span></span><span class="b-who">Harness</span></li>
+          <li class="band"><span class="b-state">review_needed</span><span class="b-what"><b>The new commit goes to review</b><span>The project’s checks run again in the implementer’s checkout first.</span></span><span class="b-who">Implementer</span></li>
+          <li class="band is-end"><span class="b-state">reviewing</span><span class="b-what"><b>A second review starts from the first</b><span>Its brief names the earlier verdict, why the PR came back and the diff since then.</span></span><span class="b-who">Reviewer</span></li>
+        </ol>
+        <p class="case-tell">No commit merges that a reviewer did not read.</p>
+      </div>
+
+      <div class="case" role="tabpanel" id="case-paths" aria-labelledby="tab-paths" tabindex="0">
+        <h3 class="case-name">Outside its paths</h3>
+        <ol class="bands">
+          <li class="band"><span class="b-state">approved</span><span class="b-what"><b>t3/review is on a1b2c3d</b><span>The reviewer read that commit and approved it.</span></span><span class="b-who">Reviewer</span></li>
+          <li class="band"><span class="b-state">asking</span><span class="b-what"><b>The PR changes src/api/client.ts</b><span>That is outside src/login/, the paths the task owns, so the merge waits.</span></span><span class="b-who">Harness</span></li>
+          <li class="band"><span class="b-state">asking</span><span class="b-what"><b>You answer merge, back or drop</b><span>The orchestrator puts the question to you with its id, as it stands.</span></span><span class="b-who">You</span></li>
+          <li class="band is-end"><span class="b-state">your call</span><span class="b-what"><b>Your answer decides</b><span>Merge confirms it, back sends it to its implementer, drop ends the task and leaves the PR open.</span></span><span class="b-who">Harness</span></li>
+        </ol>
+        <p class="case-tell">Scope stays what you agreed, unless you say otherwise.</p>
+      </div>
+
+      <div class="case" role="tabpanel" id="case-failed" aria-labelledby="tab-failed" tabindex="0">
+        <h3 class="case-name">A check failed</h3>
+        <ol class="bands">
+          <li class="band"><span class="b-state">ci_failed</span><span class="b-what"><b>A required check failed</b><span>The task cannot merge. DevOps reads the failed run and decides whose failure it is.</span></span><span class="b-who">Harness</span></li>
+          <li class="band"><span class="b-state">implementing</span><span class="b-what"><b>If the task’s code broke it</b><span>Back to the implementer, with the failing check and its cause.</span></span><span class="b-who">DevOps</span></li>
+          <li class="band"><span class="b-state">ci_failed</span><span class="b-what"><b>If a test is flaky</b><span>DevOps reruns the failed jobs once. A second failure counts as the pipeline’s.</span></span><span class="b-who">DevOps</span></li>
+          <li class="band is-end"><span class="b-state">pipeline_wait</span><span class="b-what"><b>If the pipeline broke it</b><span>DevOps fixes the pipeline in a PR of its own, reviewed like a task. The task waits for it.</span></span><span class="b-who">DevOps</span></li>
+        </ol>
+        <p class="case-tell">With DevOps off, every CI failure goes back to the implementer.</p>
+      </div>
+
+      <div class="case" role="tabpanel" id="case-behind" aria-labelledby="tab-behind" tabindex="0">
+        <h3 class="case-name">Main moved on</h3>
+        <ol class="bands">
+          <li class="band"><span class="b-state">merging</span><span class="b-what"><b>DevOps runs worker update</b><span>GitHub brings the branch up to date with main.</span></span><span class="b-who">DevOps</span></li>
+          <li class="band"><span class="b-state">merging</span><span class="b-what"><b>If the task’s change is the same</b><span>The approval carries to the new head, and CI runs on it.</span></span><span class="b-who">Harness</span></li>
+          <li class="band"><span class="b-state">implementing</span><span class="b-what"><b>If it changed or conflicts</b><span>Back to the implementer, who merges main in and keeps both sides’ intent. Never a rebase or force-push.</span></span><span class="b-who">Implementer</span></li>
+          <li class="band is-end"><span class="b-state">review_needed</span><span class="b-what"><b>The new head is reviewed again</b><span>An approval belongs to one commit, and this is a new one.</span></span><span class="b-who">Reviewer</span></li>
+        </ol>
+        <p class="case-tell">An approval never moves to code that nobody read.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="faq" id="questions" aria-labelledby="faq-title">
+  <h2 class="faq-title rise" id="faq-title" data-reveal><span class="line"><span>Before</span></span><span class="line"><span>you install</span></span></h2>
+  <div class="faq-list">
+    <details name="faq" data-reveal style="--i:1">
+      <summary>What do I need before I install it?</summary>
+      <div class="faq-answer"><p>Python 3.11 or newer, <a href="https://docs.astral.sh/uv/">uv</a> (or pipx), Git, the GitHub CLI signed in, and <a href="https://github.com/pingdotgg/t3code">T3 Code</a> with Claude, Codex or goose signed in. The orchestrator runs on Claude Code or Codex, so one of them must be on your PATH.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:2">
+      <summary>Does it work on macOS and Linux?</summary>
+      <div class="faq-answer"><p>It has only been tried on Windows so far. On macOS the watcher starts as a LaunchAgent, and on Linux as a systemd user unit. Both are covered by tests, not yet by a real login, and reports are welcome.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:3">
+      <summary>Can a worker push straight to main?</summary>
+      <div class="faq-answer"><p>No. Setup protects the branch: a pull request is required, with the CI checks and <code>t3/review</code> green on an up-to-date branch, admins included, and no force-push. DevOps merges only through <code>worker merge</code>, which squash-merges exactly the approved commit.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:4">
+      <summary>Do I have to use the DevOps worker?</summary>
+      <div class="faq-answer"><p>No. Turn it off at setup, or later with “use t3 workflow: turn DevOps off”. The workflow then updates each confirmed pull request, waits for CI and merges it itself, with no model. Every CI failure goes back to the implementer.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:5">
+      <summary>Which models do the workers use?</summary>
+      <div class="faq-answer"><p>You choose each role’s model and effort, separately, at setup or later. For what you leave open, Jev may advise an implementer’s or reviewer’s model. Otherwise the defaults apply: GPT-6.1-Sol for implementers, Sonnet 5.5 for reviewers and Opus 5.5 for DevOps, each at xhigh. Setup checks which models your T3 can run.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:6">
+      <summary>What is Jev, and do I need it?</summary>
+      <div class="faq-answer"><p>Jev is an optional model advisor. Put a TypeSafe key on one line in <code>~/.t3-workflow/secrets/typesafe-api-key.txt</code>, or set <code>TYPESAFE_API_KEY</code>. Without it, every task uses the models you chose or the defaults.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:7">
+      <summary>What does the installer change on my computer?</summary>
+      <div class="faq-answer"><p>Hooks in Claude Code’s and Codex’s settings, a marked block in <code>CLAUDE.md</code> and <code>AGENTS.md</code>, goose models in T3’s settings, and a watcher that starts when you log in. Every file it edits is backed up first, and <code>t3-workflow uninstall</code> removes it all.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:8">
+      <summary>Does it take over every session?</summary>
+      <div class="faq-answer"><p>No. The workflow is opt-in: it runs only when your message says “use t3 workflow”, and in the orchestrator’s own wakes. Any other message gets an ordinary answer, even in a bound thread.</p></div>
+    </details>
+    <details name="faq" data-reveal style="--i:9">
+      <summary>My project has no CI yet. Can I still use it?</summary>
+      <div class="faq-answer"><p>Yes. CI becomes the first plan: one task adds the pull-request workflow, and its job name becomes the required check. Deployment waits on standby until you name a server.</p></div>
+    </details>
+  </div>
+</section>
+
+<section class="close" id="install" aria-labelledby="close-title">
+  <div class="close-copy">
+    <h2 class="close-title rise" id="close-title" data-reveal><span class="line"><span>Install it,</span></span><span class="line"><span>say the words</span></span></h2>
+    <p class="close-text" data-reveal style="--i:1">Two commands install it. Then, in a T3 project on GitHub, say “use t3 workflow: set up this project”, and that session becomes the orchestrator, paused until you activate it.</p>
+  </div>
+
+  <div class="setup shutter" data-reveal style="--i:1">
+    <div class="window setup-window" data-ui>
+      <div class="window-bar" aria-hidden="true"><span class="bar-term">&gt;_</span><span>Terminal</span><span class="window-ctl"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg><svg viewBox="0 0 10 10"><path d="M.5.5h9v9h-9z"/></svg><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></svg></span></div>
+      <div class="setup-body">
+        <div class="setup-choice" role="group" aria-label="Install with">
+          <button type="button" class="seg" data-tool="uv" aria-pressed="true">uv</button>
+          <button type="button" class="seg" data-tool="pipx" aria-pressed="false">pipx</button>
+        </div>
+        <ol class="cmds">
+          <li class="cmd"><pre><code data-cmd="install"><span>uv</span> <span>tool</span> <span>install</span> <span>git+https://</span><wbr><span>github.com/</span><wbr><span>Mahmoud6901/</span><wbr><span>t3-event-workflow</span></code></pre><button type="button" class="copy" data-copy="install">Copy</button></li>
+          <li class="cmd"><pre><code data-cmd="setup">t3-workflow install</code></pre><button type="button" class="copy" data-copy="setup">Copy</button></li>
+        </ol>
+        <p class="setup-out" aria-hidden="true"><span class="ok-dot"></span>Installed. Quit and reopen T3 Code.</p>
+        <div class="setup-say">
+          <p class="say-label">Then, in a T3 project on GitHub</p>
+          <p class="say-line">use t3 workflow: set up this project</p>
+        </div>
+        <button type="button" class="button setup-copy" data-copy="all">Copy both commands</button>
+        <p class="copy-status" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer" aria-label="About this project">
+  <div class="tile tile-about" data-reveal>
+    <p class="tile-statement">Run a GitHub project in T3 Code through one session.</p>
+    <p class="tile-small">MIT licence. T3 Code, Claude, Codex, goose, OpenRouter and GitHub belong to their owners; this workflow is independent of them.</p>
+  </div>
+  <nav class="tile tile-nav" aria-label="Page" data-reveal style="--i:1">
+    <ul>
+      <li><a class="link" href="#how">How it works</a></li>
+      <li><a class="link" href="#rule">The merge rule</a></li>
+      <li><a class="link" href="#questions">Questions</a></li>
+      <li><a class="link" href="#install">Install</a></li>
+      <li><a class="link" href="ar/" hreflang="ar" lang="ar">العربية</a></li>
+    </ul>
+  </nav>
+  <div class="tile tile-version" data-reveal style="--i:2">
+    <p class="tile-big">Version 0.4.0</p>
+    <p>Python 3.11+, standard library only</p>
+  </div>
+  <a class="tile tile-issue" href="https://github.com/Mahmoud6901/t3-event-workflow/issues/new" data-reveal style="--i:3">
+    <p>Found a problem?</p>
+    <p class="tile-big">Open an issue</p>
+  </a>
+  <a class="tile tile-name" href="#top" aria-label="Back to top" data-reveal style="--i:4"><span>T3 event workflow</span></a>
+  <a class="tile tile-go" href="https://github.com/Mahmoud6901/t3-event-workflow" data-reveal style="--i:5">
+    <span class="go-text">Read the source</span>
+    <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M12 36 36 12M16 12h20v20"/></svg>
+  </a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.3.26/dist/lenis.min.js" defer></script>
+</body>
+</html>
