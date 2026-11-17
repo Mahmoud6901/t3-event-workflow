@@ -43,8 +43,8 @@ MODELS = {
     "qwen/qwen3.8-flash": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
     "moonshotai/kimi-k3.1-pro": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
 }
-DEFAULTS = {"implementer": "gpt-6.1-sol", "implementerEffort": "high", "reviewer": "claude-sonnet-5-5",
-            "reviewerEffort": "high", "devops": "claude-opus-5-5", "devopsEffort": "xhigh"}
+DEFAULTS = {"implementer": "gpt-6.1-sol", "implementerEffort": "xhigh", "reviewer": "claude-sonnet-5-5",
+            "reviewerEffort": "xhigh", "devops": "claude-opus-5-5", "devopsEffort": "xhigh"}
 QUIET_MINUTES = 30
 NUDGES = 1  # Follow-ups asking a worker that ended without its closing command to finish; then the task is blocked.
 OPEN = ("waiting", "ready", "implementing", "review_needed", "reviewing", "approved", "asking", "confirmed",
@@ -92,8 +92,13 @@ def selection(config, model_id, effort, item=None):
                GOOSE: {"provider": "openrouter"}}.get(
         item["provider"], {"reasoningEffort": effort, "serviceTier": "default"})
     if item["provider"] == GOOSE and item.get("thinking"):
-        options["thinking_effort"] = "high" if effort == "xhigh" else effort
+        options["thinking_effort"] = sent(GOOSE, effort)
     return {"providerInstanceId": item["provider"], "model": model_id, "options": options}
+
+
+def sent(provider, effort):
+    """The effort as the provider takes it: goose's thinking_effort has no xhigh, so xhigh goes as high."""
+    return "high" if provider == GOOSE and effort == "xhigh" else effort
 
 
 def validate_config(raw):
@@ -142,8 +147,17 @@ def validate_config(raw):
     return config
 
 
+def offered_efforts(model, option):
+    """The effort levels T3 offers for one model, from its effort option; [] when it has none."""
+    for descriptor in (model.get("capabilities") or {}).get("optionDescriptors") or []:
+        if isinstance(descriptor, dict) and descriptor.get("id") == option:
+            return [o["id"] for o in descriptor.get("options") or []
+                    if isinstance(o, dict) and isinstance(o.get("id"), str) and o["id"] != "off"]
+    return []
+
+
 def t3_lists():
-    """What this computer's T3 can run: ({provider: {model: declares an effort option}} for each ready provider,
+    """What this computer's T3 can run: ({provider: {model: the effort levels it offers}} for each ready provider,
     {provider: why not} for the others). (None, {}) when T3's lists are not here, so nothing can be checked."""
     if not Path(T3_CACHES).is_dir():
         return None, {}
@@ -160,7 +174,7 @@ def t3_lists():
         if (cache.get("auth") or {}).get("status") == "unauthenticated":
             why[provider] = f"{name} is not signed in, in T3"
             continue
-        models = {m["slug"]: any(d.get("id") == option for d in (m.get("capabilities") or {}).get("optionDescriptors") or [])
+        models = {m["slug"]: offered_efforts(m, option)
                   for m in cache.get("models") or [] if isinstance(m, dict) and isinstance(m.get("slug"), str)}
         if models:
             lists[provider] = models
@@ -192,25 +206,49 @@ def update_fix(config, outcome, number):
 
 
 def role_model(config, state, role):
-    """The model a new worker in this role starts on, unless Jev advises another for an unpicked role."""
-    pick = (state.get("picks") or {}).get(role)
-    if pick:
-        return {"model": pick["model"], "effort": pick["effort"], "source": "pick"}
-    return {"model": config["defaults"][role], "effort": config["defaults"][role + "Effort"], "source": "default"}
+    """What a new worker in this role starts on: the user's model and effort where set, else the defaults. For an
+    implementer or reviewer, Jev may advise another model, and an effort the user did not set."""
+    pick = (state.get("picks") or {}).get(role) or {}
+    return {"model": pick.get("model") or config["defaults"][role], "modelSource": "pick" if pick.get("model") else "default",
+            "effort": pick.get("effort") or config["defaults"][role + "Effort"],
+            "effortSource": "pick" if pick.get("effort") else "default"}
 
 
-def picked(role, raw, defaults, lists):
-    """A role's model, chosen by the user from what T3 can run (Claude, Codex or goose):
-    {"model", "effort", "provider", "thinking"}."""
+CLEAR = (None, "", "default")
+
+
+def settle_pick(role, current, raw, defaults, lists):
+    """A role's setting after the user's choice. Its model (one T3 runs) and its effort are separate: a choice names one
+    or both and keeps the other, and "default" clears one. {} when neither is set."""
     require(role in ROLES, f"picks are for {', '.join(ROLES)}")
     raw = raw if isinstance(raw, dict) else {"model": raw}
-    model = text(raw.get("model"), f"picks.{role}.model")
-    require(lists is not None, "T3's model lists are not on this computer, so no model can be picked")
-    provider = next((p for p in PROVIDERS if model in lists.get(p, {})), None)
-    require(provider, f"T3 cannot run {model}; search what it can with the models operation")
-    effort = raw.get("effort") or defaults[role + "Effort"]
-    require(effort in EFFORTS, f"picks.{role}.effort must be one of {', '.join(EFFORTS)}")
-    return {"model": model, "effort": effort, "provider": provider, "thinking": lists[provider][model]}
+    require("model" in raw or "effort" in raw, f"picks.{role} names a model, an effort or both")
+    pick = dict(current or {})
+    if "model" in raw:
+        for key in ("model", "provider", "thinking", "efforts"):
+            pick.pop(key, None)
+        if raw["model"] not in CLEAR:
+            model = text(raw["model"], f"picks.{role}.model")
+            require(lists is not None, "T3's model lists are not on this computer, so no model can be picked")
+            provider = next((p for p in PROVIDERS if model in lists.get(p, {})), None)
+            require(provider, f"T3 cannot run {model}; search what it can with the models operation")
+            efforts = list(lists[provider][model])
+            pick.update(model=model, provider=provider, thinking=bool(efforts), efforts=efforts)
+    if "effort" in raw:
+        pick.pop("effort", None)
+        if raw["effort"] not in CLEAR:
+            pick["effort"] = text(raw["effort"], f"picks.{role}.effort")
+    offered, effort = pick.get("efforts") or [], pick.get("effort")
+    if offered and effort:
+        require(effort in offered, f"{pick['model']} takes the effort {', '.join(offered)}, not {effort}")
+    elif offered:
+        default = defaults[role + "Effort"]
+        require(sent(pick["provider"], default) in offered, f"{pick['model']} does not take the {role}'s default effort, "
+                f"{default}; choose one of {', '.join(offered)}")
+    elif effort and not pick.get("model"):
+        require(effort in EFFORTS, f"Without a model, the effort is one of {', '.join(EFFORTS)}; {effort} is a level only "
+                f"some models have, so pick the model with it")
+    return pick
 
 
 def default_jev(config, context):
@@ -297,13 +335,14 @@ class Flow:
         require(isinstance(devops, bool), "devops is true (a DevOps worker merges) or false (the harness merges)")
         lists, why = t3_lists()
         state = new_state()
-        state["picks"] = {role: picked(role, raw, config["defaults"], lists) for role, raw in picks.items()}
+        state["picks"] = {role: pick for role, raw in picks.items()
+                          if (pick := settle_pick(role, {}, raw, config["defaults"], lists))}
         state["devopsOn"] = devops
         if lists is not None:  # Every role must start on something this T3 runs, and Jev advises only among those.
             for role in ROLES:
                 model = config["defaults"][role]
                 provider = config["models"][model]["provider"]
-                require(role in state["picks"] or runs(lists, model, provider),
+                require(state["picks"].get(role, {}).get("model") or runs(lists, model, provider),
                         f"T3 cannot run {model}, the {role}'s default ({why.get(provider) or 'T3 does not list it'}). "
                         f"Pick a model for the {role}; the models operation lists what T3 runs.")
             config["models"] = {m: item for m, item in config["models"].items() if runs(lists, m, item["provider"])}
@@ -323,30 +362,32 @@ class Flow:
             return {"known": False, "defaults": defaults,
                     "reason": "T3's model lists are not on this computer, so nothing can be checked or picked."}
         words = str(req.get("search") or "").lower().split()
-        hits = [{"model": m, "provider": PROVIDERS[p][0], "effort": lists[p][m]}
+        hits = [{"model": m, "provider": PROVIDERS[p][0], "efforts": lists[p][m]}
                 for p in PROVIDERS for m in sorted(lists.get(p, {})) if all(w in m.lower() for w in words)]
         return {"known": True, "providers": {name: why.get(p, "ready") for p, (name, _) in PROVIDERS.items()},
                 "defaults": defaults, "models": hits[:MATCHES], "more": max(0, len(hits) - MATCHES)}
 
     def pick(self, project, req):
-        """The user's later model change for a role; no model (or "default") goes back to the default.
-        Workers already started keep the model they run on."""
+        """The user's later change to a role's model, its effort or both; "default" (or no value) puts one back.
+        Workers already started keep what they run on."""
         role = req.get("role")
         require(role in ROLES, f"role is one of {', '.join(ROLES)}")
         text(req.get("authorization"), "authorization (the user's own words)")
-        raw = None if req.get("model") in (None, "", "default") else {"model": req.get("model"), "effort": req.get("effort")}
-
+        raw = {key: req[key] for key in ("model", "effort") if key in req}
+        require(raw, "Name a model, an effort or both")
         lists, _ = t3_lists()
 
         def change(config, state):
             picks = state.setdefault("picks", {})
-            if raw is None:
+            if "model" in raw and raw["model"] in CLEAR:
                 model = config["defaults"][role]
                 require(model in config["models"] and runs(lists, model, config["models"][model]["provider"]) is not False,
                         f"T3 cannot run {model}, the {role}'s default; pick another model")
-                picks.pop(role, None)
+            pick = settle_pick(role, picks.get(role), raw, config["defaults"], lists)
+            if pick:
+                picks[role] = pick
             else:
-                picks[role] = picked(role, raw, config["defaults"], lists)
+                picks.pop(role, None)
             return {"role": role, **role_model(config, state, role)}
         return self.transact(project, change, "pick")
 
@@ -463,7 +504,8 @@ class Flow:
                         health.ok(self.path.parent, "github")
                     except github.Failed as error:  # The rule waits for the next wake.
                         health.failed(self.path.parent, "github", error)
-            advised = set(jev.ROLES) - set(state.get("picks") or {})  # Jev advises only roles the user left on default.
+            picks = state.get("picks") or {}  # Jev advises only roles whose model the user left on default.
+            advised = {role for role in jev.ROLES if not (picks.get(role) or {}).get("model")}
             for task_id in sorted(ready) if advised else ():
                 task = state["tasks"][task_id]
                 try:
@@ -714,19 +756,21 @@ class Flow:
         task["rev"] += 1
 
     def add_worker(self, config, state, role, plan, task_id, choice=None):
-        """The user's pick for the role wins; else Jev's advice when it names an approved model; else the default.
-        The worker keeps its model entry, so a later pick never changes a worker already started."""
-        pick = (state.get("picks") or {}).get(role)
-        choice = {} if pick else (choice or {})
+        """Model and effort each come from the user's setting for the role; else Jev's advice (when the user set no model,
+        and it names an approved one); else the default. The worker keeps its model entry, so a later change never
+        reaches a worker already started."""
+        pick = (state.get("picks") or {}).get(role) or {}
+        choice = {} if pick.get("model") else (choice or {})
         model = choice.get(role) if role in (config["models"].get(choice.get(role)) or {}).get("roles", []) else None
         effort = choice.get(role + "Effort") if choice.get(role + "Effort") in EFFORTS else None
         worker = {"id": next_id(state, "w"), "token": secrets.token_hex(16), "role": role, "plan": plan, "task": task_id,
-                  "model": model or config["defaults"][role], "effort": effort or config["defaults"][role + "Effort"],
+                  "model": model or config["defaults"][role],
+                  "effort": pick.get("effort") or effort or config["defaults"][role + "Effort"],
                   "modelSource": "jev" if model else "default", "childThreadId": None, "taskIds": [], "state": "prepared",
                   "job": None, "path": None}
-        if pick:
-            worker.update(model=pick["model"], effort=pick["effort"], modelSource="pick",
-                          entry={"provider": pick.get("provider", GOOSE), "roles": [role], "thinking": pick["thinking"]})
+        if pick.get("model"):
+            worker.update(model=pick["model"], modelSource="pick",
+                          entry={"provider": pick.get("provider", GOOSE), "roles": [role], "thinking": pick.get("thinking", False)})
         state["workers"][worker["id"]] = worker
         return worker
 

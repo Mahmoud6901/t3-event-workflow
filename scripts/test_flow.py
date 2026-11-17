@@ -15,16 +15,24 @@ import flow  # noqa: E402
 import github  # noqa: E402
 import harness  # noqa: E402
 
-GOOSE_LIST = [  # The shape of T3's ~/.t3/caches/acpRegistry_goose.json entries.
+def levels(*ids):
+    return [{"id": i, "label": i.title()} for i in ids]
+
+
+# The shape of T3's ~/.t3/caches entries (2026-11-17): each effort option lists its levels.
+GOOSE_LIST = [
     {"slug": "qwen/qwen3.8-flash", "name": "qwen/qwen3.8-flash",
      "capabilities": {"optionDescriptors": [{"id": "provider"}, {"id": "mode"}]}},
     {"slug": "anthropic/claude-sonnet-4", "name": "anthropic/claude-sonnet-4",
-     "capabilities": {"optionDescriptors": [{"id": "provider"}, {"id": "mode"}, {"id": "thinking_effort"}]}},
+     "capabilities": {"optionDescriptors": [{"id": "provider"}, {"id": "mode"},
+                                            {"id": "thinking_effort", "options": levels("off", "low", "medium", "high", "max")}]}},
     {"slug": "qwen/qwen3.8-max", "name": "qwen/qwen3.8-max", "capabilities": {"optionDescriptors": [{"id": "provider"}]}},
 ]
-CLAUDE_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [{"id": "effort"}]}}
+CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultrathink"]
+CLAUDE_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [{"id": "effort", "options": levels(*CLAUDE_EFFORTS)}]}}
                for s in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")]
-CODEX_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [{"id": "reasoningEffort"}]}}
+CODEX_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [
+    {"id": "reasoningEffort", "options": levels("low", "medium", "high", "xhigh", "max", "ultra")}]}}
               for s in ("gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra")]
 
 ORCH = "thread-orch"
@@ -198,11 +206,11 @@ class FlowTests(unittest.TestCase):
         self.t3_caches()
         found = self.orchestrator("models", search="QWEN")
         self.assertTrue(found["ok"], found)
-        self.assertEqual(found["models"], [{"model": "qwen/qwen3.8-flash", "provider": "goose", "effort": False},
-                                           {"model": "qwen/qwen3.8-max", "provider": "goose", "effort": False}])
+        self.assertEqual(found["models"], [{"model": "qwen/qwen3.8-flash", "provider": "goose", "efforts": []},
+                                           {"model": "qwen/qwen3.8-max", "provider": "goose", "efforts": []}])
         self.assertEqual(self.orchestrator("models", search="sonnet")["models"],
-                         [{"model": "claude-sonnet-5-5", "provider": "Claude", "effort": True},
-                          {"model": "anthropic/claude-sonnet-4", "provider": "goose", "effort": True}])
+                         [{"model": "claude-sonnet-5-5", "provider": "Claude", "efforts": CLAUDE_EFFORTS},
+                          {"model": "anthropic/claude-sonnet-4", "provider": "goose", "efforts": ["low", "medium", "high", "max"]}])
         self.assertEqual(found["providers"], {"Claude": "ready", "Codex": "ready", "goose": "ready"})
 
     def test_setup_is_told_why_a_provider_cannot_run_and_without_t3_nothing_is_checked(self):
@@ -219,7 +227,8 @@ class FlowTests(unittest.TestCase):
     def test_without_codex_setup_needs_a_pick_for_the_implementer_and_it_runs_on_claude(self):
         self.t3_caches(codex=None)
         found = self.orchestrator("models")
-        self.assertEqual(found["defaults"]["implementer"], {"model": "gpt-6.1-sol", "effort": "high", "runs": False})
+        self.assertEqual(found["defaults"]["implementer"], {"model": "gpt-6.1-sol", "effort": "xhigh", "runs": False})
+        self.assertEqual(found["defaults"]["reviewer"]["effort"], "xhigh")
         self.assertTrue(found["defaults"]["reviewer"]["runs"])
         refused = self.orchestrator("init", workspace=str(self.workspace), repo=REPO, requiredChecks=["acceptance"], checks=[],
                                     noChecksReason="Test project")
@@ -230,7 +239,7 @@ class FlowTests(unittest.TestCase):
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         (call,) = self.orchestrator("next")["calls"]
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "claudeAgent", "model": "claude-sonnet-5-5",
-                                                       "options": {"effort": "high"}})
+                                                       "options": {"effort": "xhigh"}})
 
     def test_jev_advises_only_among_the_models_t3_can_run(self):
         self.t3_caches(codex=None)
@@ -256,6 +265,14 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(self.orchestrator("next")["calls"])
         self.assertEqual(getattr(self, "jev_asked", 0), 0)
 
+    def test_an_effort_set_alone_wins_over_jevs_and_jev_still_picks_the_model(self):
+        self.jev_answer["implementer"] = "gpt-6-luna"
+        self.bind(picks={"implementer": {"effort": "max"}})
+        self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
+        (call,) = self.orchestrator("next")["calls"]
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "codex", "model": "gpt-6-luna",
+                                                       "options": {"reasoningEffort": "max", "serviceTier": "default"}})
+
     def test_a_pick_t3_does_not_list_is_refused_and_nothing_is_bound(self):
         self.t3_caches()
         refused = self.orchestrator("init", workspace=str(self.workspace), repo=REPO, requiredChecks=["acceptance"], checks=[],
@@ -275,10 +292,41 @@ class FlowTests(unittest.TestCase):
         (call,) = self.orchestrator("next")["calls"]
         self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.1-sol", "the started implementer keeps Jev's model")
         self.assertEqual(self.orchestrator("status")["models"]["implementer"],
-                         {"model": "qwen/qwen3.8-flash", "effort": "high", "source": "pick"})
+                         {"model": "qwen/qwen3.8-flash", "modelSource": "pick", "effort": "xhigh", "effortSource": "default"})
         self.assertTrue(self.orchestrator("pick", role="implementer", model=None, authorization="Back to the default.")["ok"])
         self.assertEqual(self.orchestrator("status")["models"]["implementer"],
-                         {"model": "gpt-6.1-sol", "effort": "high", "source": "default"})
+                         {"model": "gpt-6.1-sol", "modelSource": "default", "effort": "xhigh", "effortSource": "default"})
+
+    def test_the_user_sets_a_roles_model_and_effort_apart_and_puts_each_back(self):
+        self.t3_caches()
+        self.bind()
+        say = {"authorization": "Use max for the reviewer."}
+        reviewer = lambda: self.status()["models"]["reviewer"]  # noqa: E731
+        self.assertEqual(self.orchestrator("pick", role="reviewer", effort="max", **say)["effort"], "max")
+        self.assertEqual(reviewer(), {"model": "claude-sonnet-5-5", "modelSource": "default", "effort": "max", "effortSource": "pick"})
+        self.assertTrue(self.orchestrator("pick", role="reviewer", model="claude-opus-5-5", **say)["ok"])
+        self.assertEqual(reviewer(), {"model": "claude-opus-5-5", "modelSource": "pick", "effort": "max", "effortSource": "pick"})
+        self.assertTrue(self.orchestrator("pick", role="reviewer", model="default", **say)["ok"])
+        self.assertEqual(reviewer(), {"model": "claude-sonnet-5-5", "modelSource": "default", "effort": "max", "effortSource": "pick"})
+        self.assertTrue(self.orchestrator("pick", role="reviewer", effort="default", **say)["ok"])
+        self.assertEqual(reviewer()["effortSource"], "default")
+        self.assertFalse(self.orchestrator("pick", role="reviewer", **say)["ok"], "a change names a model or an effort")
+
+    def test_an_effort_is_one_its_model_offers_and_one_set_alone_is_one_every_model_has(self):
+        self.t3_caches()
+        self.bind(picks={"implementer": {"model": "gpt-6.1-sol", "effort": "ultra"}})
+        self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
+        (call,) = self.orchestrator("next")["calls"]
+        self.assertEqual(call["arguments"]["target"]["options"], {"reasoningEffort": "ultra", "serviceTier": "default"})
+        say = {"authorization": "Change the efforts."}
+        alone = self.orchestrator("pick", role="reviewer", effort="ultra", **say)
+        self.assertIn("pick the model with it", alone.get("error", ""))
+        kept = self.orchestrator("pick", role="implementer", model="claude-sonnet-5-5", **say)  # its ultra is Codex's alone
+        self.assertIn("claude-sonnet-5-5 takes the effort low, medium, high, xhigh, max, ultrathink, not ultra",
+                      kept.get("error", ""))
+        goose = self.orchestrator("pick", role="implementer", model="anthropic/claude-sonnet-4", effort="xhigh", **say)
+        self.assertIn("takes the effort low, medium, high, max, not xhigh", goose.get("error", ""))
+        self.assertEqual(self.status()["models"]["implementer"]["effort"], "ultra", "a refused change changes nothing")
 
     def test_an_openrouter_worker_gets_only_the_options_its_model_declares(self):
         # T3's goose list (2026-11-16): the four approved OpenRouter models declare `provider` and `mode`, not

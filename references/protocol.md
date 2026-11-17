@@ -20,8 +20,8 @@ with a reason you can act on.
 | control | `{"op":"control","action":"activate","authorization":"<the user's words>"}` | `control` |
 | status | `{"op":"status"}` | plans, tasks, each role's model, working workers, open asks, problems |
 | setup_github | `{"op":"setup_github","authorization":"<the user's words>"}` | `repo`, `changed` |
-| models | `{"op":"models","search":"qwen"}` | `providers`, `defaults` (each with `runs`), `models` (each with `provider`, `effort`) |
-| pick | `{"op":"pick","role":"reviewer","model":"…","authorization":"<the user's words>"}` | `model`, `effort`, `source` |
+| models | `{"op":"models","search":"qwen"}` | `providers`, `defaults` (each with `runs`), `models` (each with `provider`, `efforts`) |
+| pick | `{"op":"pick","role":"reviewer","model":"…","effort":"xhigh","authorization":"<the user's words>"}` | `model`, `effort`, each with its source |
 | devops | `{"op":"devops","on":false,"authorization":"<the user's words>"}` | `devops`, `keep` |
 
 - **next** returns:
@@ -59,8 +59,9 @@ with a reason you can act on.
   auto-merge off. It protects the branch with a required PR (0 approvals), the CI checks plus
   `t3/review` on an up-to-date branch, admins included, and no force-push or deletion. It changes
   only what differs, and needs the user's own words.
-- **pick** sets a role's model from `models`, with `effort` (low to max) only for one with `"effort": true`.
-  `"model":"default"` goes back, if T3 runs the default. Running workers keep theirs.
+- **pick** sets a role's model (from `models`), its effort, or both; the other stays. An effort is one of
+  the model's `efforts`, or low to max alone. `"default"` puts one back (a model, if T3 runs it).
+  Running workers keep theirs.
 - **devops** turns DevOps on or off for plans that start later; `keep` lists running plans that stay as
   they are. Off, `next` merges each confirmed PR itself, one at a time, with DevOps's update and merge
   checks; the watcher wakes you when CI finishes. Every CI failure goes to the implementer.
@@ -120,7 +121,7 @@ A refused command changes nothing. Its error says what to do.
 
 `init` creates a binding, paused; [setup](setup.md#3-bind-it) lists its fields.
 
-Jev picks the model and effort of each implementer and reviewer without a pick. When it gives no answer, the defaults apply, and `status` shows a `jev` problem after three failures in a row.
+Jev picks an implementer's or reviewer's model when the user chose none, with its effort unless the user chose one. When it gives no answer, the defaults apply, and `status` shows a `jev` problem after three failures in a row.
 
 **Problems:** `status` lists any background part (watcher scan, its sends, hooks, Jev, GitHub, a
 checkout) that failed three times in a row. A part's next success clears it.

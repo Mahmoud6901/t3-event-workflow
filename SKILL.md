@@ -11,9 +11,9 @@ back. Everything else runs in the background, as T3 delegated tasks the orchestr
 | Role | Does | Model |
 |---|---|---|
 | Orchestrator | Plans with the user, makes the harness's calls, reports | Any Claude or Codex model, picked by the user in T3 |
-| Implementer | One task in its own T3 checkout, ending in one PR | Jev picks |
-| Reviewer | Reads the PR at one commit and approves it or asks for changes | Jev picks |
-| DevOps | One per plan: updates and squash-merges confirmed PRs, triages CI, owns the pipeline. The user can turn it off; then the harness merges | Claude Opus 5.5, `xhigh` |
+| Implementer | One task in its own T3 checkout, ending in one PR | The user's choice, else Jev's, else GPT-6.1-Sol, `xhigh` |
+| Reviewer | Reads the PR at one commit and approves it or asks for changes | The user's choice, else Jev's, else Sonnet 5.5, `xhigh` |
+| DevOps | One per plan: updates and squash-merges confirmed PRs, triages CI, owns the pipeline. The user can turn it off; then the harness merges | The user's choice, else Opus 5.5, `xhigh` |
 
 A task merges only when all of these hold:
 - the reviewer approved the PR's exact head commit (the `t3/review` status)

@@ -26,27 +26,30 @@ Until the binding exists, your hook does not guard this session. Read and ask; c
 
 ## 2. Ask about models and DevOps
 
-Each role has a default model, and the user can pick any model their T3 runs instead. Run `models`
-the way step 3 runs `init`, with the ids from step 1:
+Each role has a default model and effort. The user can choose, for each role, any model their T3 runs,
+any effort it offers, both, or neither. Run `models` the way step 3 runs `init`, with the ids from
+step 1:
 
 ```json
 {"op":"models","projectId":"<T3 project id>","threadId":"<this thread's id>","search":"<words>"}
 ```
 
-- If `known` is false, tell the user its `reason` and go on: every role keeps its default.
+- If `known` is false, tell the user its `reason` and go on: every role keeps its default model, and
+  only efforts can be chosen.
 - Otherwise tell the user which `providers` T3 can run, and why any other cannot. If none is ready,
   stop: T3 needs Claude, Codex or goose enabled and signed in.
-- Then, for the implementer, the reviewer and DevOps in turn, show the role's default from `defaults`.
-  When its `runs` is true, ask for another model or a skip. When it is false, this T3 cannot run it,
-  so the user picks one; `init` refuses that role without a pick.
+- Then, for the implementer, the reviewer and DevOps in turn, show the role's default model and
+  effort from `defaults`, and ask for a model, an effort, both, or a skip. When its `runs` is false,
+  this T3 cannot run the default, so the user picks a model; `init` refuses that role without one.
 - Search with the user's words and show the matches with their `provider`; `more` counts the ones not
   shown. Offer only a model the list returned.
-- Ask for an effort (low, medium, high or max) only when the chosen model has `"effort": true`.
-- A picked role always runs on its pick. A skipped role keeps its default, and Jev may advise another
-  model this T3 runs for an implementer or reviewer.
+- Offer the efforts in the chosen model's `efforts` (none when it is empty). Without a chosen model,
+  offer low, medium, high, xhigh or max.
+- A role runs on the model and effort the user chose. For what they skipped, Jev may advise an
+  implementer's or reviewer's model and effort among the models this T3 runs; else the default applies.
 
-Add the picks to `init` as `"picks":{"reviewer":{"model":"<model>","effort":"high"}}`, or as
-`"reviewer":"<model>"` when no effort was asked.
+Add the choices to `init`, leaving out what the user skipped:
+`"picks":{"reviewer":{"model":"<model>","effort":"max"},"implementer":{"effort":"xhigh"}}`.
 
 Then ask whether a DevOps worker merges the PRs (the default), or the harness, with no model. For the
 harness, add `"devops":false` to `init`. Without DevOps, the harness brings each confirmed PR up to
@@ -84,9 +87,9 @@ In Codex's PowerShell, pipe a here-string instead, and keep the JSON ASCII (writ
 | `requiredChecks` | The CI check names that must pass before a merge |
 | `checks` | Local checks `worker pr` runs, each `{"name","argv","cwd","timeoutSeconds"}`. Give `argv` as a list, not shell text; `cwd` is relative to the project folder. |
 | `noChecksReason` | Why there are no local checks, when `checks` is empty |
-| `defaults` | Models and efforts without a pick or Jev's answer: implementer GPT-6.1-Sol at high, reviewer Sonnet 5.5 at high, DevOps Opus 5.5 at `xhigh` |
+| `defaults` | Models and efforts without the user's choice or Jev's answer: implementer GPT-6.1-Sol, reviewer Sonnet 5.5, DevOps Opus 5.5, each at `xhigh` |
 | `quietMinutes` | Minutes before the watcher reports a quiet worker (default 30) |
-| `picks` | The user's model per role, from step 2 |
+| `picks` | The user's model and effort per role, from step 2 |
 | `devops` | `false` merges without a DevOps worker (default `true`), from step 2 |
 
 The binding starts paused. If it says the project is already bound, point the user to its orchestrator
@@ -105,8 +108,9 @@ GitHub refuses branch protection, the repo is private on a plan without it: tell
 Tell the user:
 - the binding: the repo, the branch, and both kinds of checks
 - what `setup_github` changed
-- the model each role starts on, and that they can change one later with "use t3 workflow: use
-  <model> for the reviewer", or go back with "use t3 workflow: back to default for the reviewer"
+- the model and effort each role starts on, and that they can change either later with "use t3
+  workflow: use <model> for the reviewer" or "use t3 workflow: use max effort for the implementer",
+  or go back with "use t3 workflow: back to default for the reviewer"
 - whether DevOps merges, and that "use t3 workflow: turn DevOps off" (or on) changes it for plans that
   start later
 - that the binding is paused, and work starts once they say to activate it
@@ -156,4 +160,5 @@ jobs:
 - Archive the old coordinator, implementer, reviewer and decision-maker threads in T3.
 - The old `<project>-tracks` folders can go once their work is merged or dropped.
 
-A binding's settings are fixed at `init`, except the models the user picks, which `pick` changes.
+A binding's settings are fixed at `init`, except the models and efforts the user chooses, which `pick`
+changes.

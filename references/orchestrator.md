@@ -62,7 +62,7 @@ plan you wrote: its tasks, their order, and what starts at once.
 | "Drop <task>" | `queue_edit` with `drop` |
 | Pause, resume, stop | `control` |
 | "Status", or "what's happening?" | `status`, then a short summary |
-| "Use <model> for the reviewer", "back to default" | `models`, then `pick` with their words as `authorization` |
+| "Use <model> for the reviewer", "max effort for the implementer", "back to default" | `models` for a model, then `pick` with their words as `authorization` |
 | "Turn DevOps off" (or on) | `devops` with their words as `authorization`; plans in `keep` stay as they started |
 | New or changed work | Plan it, then `queue_edit` |
 
