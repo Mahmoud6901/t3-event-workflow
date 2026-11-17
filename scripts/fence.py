@@ -54,11 +54,19 @@ def unquote(word):
     return word[1:-1] if len(word) > 1 and word[0] == word[-1] and word[0] in "\"'" else word
 
 
+def variable(match):
+    """The value of the variable a match names, the name in any case as Windows reads it; the text itself when unset."""
+    name = match[1]
+    if name in os.environ:
+        return os.environ[name]
+    return next((value for key, value in os.environ.items() if key.upper() == name.upper()), match[0])
+
+
 def expand(text):
     """A path as a shell reads it: the home folder, $HOME, PowerShell's $env:NAME (any case) and cmd's %NAME%."""
     text = re.sub(r"\$\{HOME\}|\$HOME(?!\w)", lambda m: str(Path.home()), text)
-    text = re.sub(r"\$env:(\w+)", lambda m: os.environ.get(m[1], m[0]), text, flags=re.IGNORECASE)
-    text = re.sub(r"%(\w+)%", lambda m: os.environ.get(m[1], m[0]), text)
+    text = re.sub(r"\$env:(\w+)", variable, text, flags=re.IGNORECASE)
+    text = re.sub(r"%(\w+)%", variable, text)
     return os.path.expanduser(text)
 
 

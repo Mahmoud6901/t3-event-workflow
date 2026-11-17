@@ -22,7 +22,7 @@ class RoutingTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        root = Path(self.tmp.name)
+        root = Path(self.tmp.name).resolve()  # The long name: Windows' temporary folder can be a short one.
         for name, value in (("T3CODE_HOME", str(root / "t3")), ("T3_WORKFLOW_NO_WATCHER", "1"), ("TYPESAFE_API_KEY", "")):
             patcher = patch.dict(os.environ, {name: value})
             patcher.start()

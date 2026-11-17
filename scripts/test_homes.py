@@ -24,7 +24,7 @@ class HomeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()  # The long name: Windows' temporary folder can be a short one.
         self.shared = self.root / "shared"
         self.db = self.shared / "state" / "harness.sqlite3"
         self.homes = self.shared / "state" / "homes"
