@@ -1,6 +1,6 @@
 /* T3 event workflow landing page.
-   T3 Code's own theme: a black ground, neutral greys and its blue, the product's interface as the
-   pictures (set in T3 Code's system type), masked rises and a blue field for the close.
+   T3 Code's black ground and neutral greys with a deep indigo accent, the product's interface as the
+   pictures (set in T3 Code's system type), masked rises and an indigo field for the close.
    Dark is the default; [data-theme="light"] is the optional light set of the same roles. */
 
 :root,
@@ -13,15 +13,15 @@
   --surface-3: #262626;
   --ink: #f5f5f5;
   --muted: #a3a3a3;
-  --accent: #346bf1;
-  --accent-strong: #2f60d9;
+  --accent: #1e1447;
+  --accent-strong: #2a1d5f;
   --accent-ink: #ffffff;
-  --accent-text: #51a2ff;   /* the accent used as text on the ground */
-  --button: #346bf1;
-  --button-hover: #2f60d9;
+  --accent-text: #a798ee;   /* the accent, lightened to read as text on black */
+  --button: #1e1447;
+  --button-hover: #2a1d5f;
   --button-ink: #ffffff;
-  --tile-name: #f5f5f5;
-  --tile-name-ink: #000000;
+  --tile-name: #111111;
+  --tile-name-ink: #f5f5f5;
 
   /* the product's own interface, as T3 Code draws it in the dark */
   --ui-bg: #0a0a0a;
@@ -42,8 +42,8 @@
   --ui-amber-bg: rgba(254, 154, 0, 0.14);
   --ui-amber-ink: #ffb900;
   --ui-red: #fb414a;
-  --ui-accent-bg: rgba(52, 107, 241, 0.2);
-  --ui-accent-ink: #51a2ff;
+  --ui-accent-bg: rgba(167, 152, 238, 0.16);
+  --ui-accent-ink: #a798ee;
   --ui-you: #1e1e1e;
 
   --font: "Zain", sans-serif;
@@ -83,15 +83,15 @@
   --surface-3: #d4d4d8;
   --ink: #18181b;
   --muted: #66666f;
-  --accent: #1b4ed8;
-  --accent-strong: #3260dc;
+  --accent: #1e1447;
+  --accent-strong: #2a1d5f;
   --accent-ink: #ffffff;
-  --accent-text: #1b4ed8;
-  --button: #1b4ed8;
-  --button-hover: #3260dc;
+  --accent-text: #4a3aa8;
+  --button: #1e1447;
+  --button-hover: #2a1d5f;
   --button-ink: #ffffff;
-  --tile-name: #18181b;
-  --tile-name-ink: #fcfcfc;
+  --tile-name: #f4f4f5;
+  --tile-name-ink: #18181b;
 
   --ui-bg: #ffffff;
   --ui-bar: #fafafa;
@@ -111,8 +111,8 @@
   --ui-amber-bg: rgba(254, 154, 0, 0.12);
   --ui-amber-ink: #bb4d00;
   --ui-red: #fb2c36;
-  --ui-accent-bg: rgba(27, 78, 216, 0.1);
-  --ui-accent-ink: #1b4ed8;
+  --ui-accent-bg: rgba(74, 58, 168, 0.1);
+  --ui-accent-ink: #4a3aa8;
   --ui-you: #ebebed;
 }
 
@@ -391,7 +391,7 @@ html:not(.js) .rule-body { grid-template-columns: minmax(0, 1fr); }
 .faq details[open] code { background: rgba(0, 0, 0, 0.2); }
 @media (hover: hover) and (pointer: fine) { .faq details:not([open]):hover { background: var(--surface-2); } }
 
-/* ---------- the close: the first step, already open, on the one blue field ---------- */
+/* ---------- the close: the first step, already open, on the one indigo field ---------- */
 .close { min-height: 90svh; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gutter); align-items: center; padding-block: clamp(4rem, 8vw, 7rem); background: var(--accent); color: var(--accent-ink); }
 .close ::selection { background: var(--accent-ink); color: var(--accent); }
 .close :focus-visible { outline-color: var(--accent-ink); }
@@ -399,7 +399,7 @@ html:not(.js) .rule-body { grid-template-columns: minmax(0, 1fr); }
 .close-title { font-size: var(--step-display); line-height: 0.96; letter-spacing: -0.02em; }
 .close-text { margin-top: 1.5rem; max-width: 40ch; }
 .setup { grid-column: 7 / -1; justify-self: end; width: min(100%, 36rem); }
-.setup-window { --ui-bg: #0a0a0a; --ui-bar: #111111; --ui-bar-ink: #a3a3a3; --ui-panel: #111111; --ui-raise: #1a1a1a; --ui-raise-2: #262626; --ui-text: #f5f5f5; --ui-muted: #a3a3a3; --ui-green: #00bc7d; --ui-frame: rgba(0, 0, 0, 0.25); --term-accent: #51a2ff; --accent: #346bf1; --accent-strong: #2f60d9; --accent-ink: #ffffff; }
+.setup-window { --ui-bg: #0a0a0a; --ui-bar: #111111; --ui-bar-ink: #a3a3a3; --ui-panel: #111111; --ui-raise: #1a1a1a; --ui-raise-2: #262626; --ui-text: #f5f5f5; --ui-muted: #a3a3a3; --ui-green: #00bc7d; --ui-frame: rgba(0, 0, 0, 0.25); --term-accent: #a798ee; --accent: #3b2b8c; --accent-strong: #45349e; --accent-ink: #ffffff; }
 .bar-term { font-family: var(--font-code); font-size: 12px; color: var(--term-accent); }
 .setup-body { display: grid; gap: 14px; padding: 18px; font-size: var(--ui-m); }
 .setup-choice { display: inline-flex; justify-self: start; gap: 2px; padding: 2px; border-radius: 6px; background: var(--ui-raise); }
