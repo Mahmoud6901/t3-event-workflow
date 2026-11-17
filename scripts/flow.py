@@ -882,8 +882,7 @@ class Flow:
     # Workers
 
     def worker(self, command, args):
-        project, worker = self.find_worker(args["worker"])
-        require(hmac.compare_digest(worker["token"], args["token"]), "This worker's token does not match")
+        project, worker = self.find_worker(args["worker"], args["token"])
         handler = {"pr": self.pr, "stuck": self.stuck, "review": self.review, "take": self.take, "update": self.update,
                    "merge": self.merge, "failed": self.failed, "pipeline": self.pipeline}.get(command)
         require(handler, f"{command} is not available yet")
@@ -891,12 +890,16 @@ class Flow:
             require(worker["role"] == "devops", f"Only DevOps runs {command}")
         return handler(project, worker, args)
 
-    def find_worker(self, worker_id):
+    def find_worker(self, worker_id, token):
+        """Worker ids are counters per project, so several projects share them: the token picks the worker."""
+        known = False
         for project, raw in self.db.execute("SELECT id, state FROM projects"):
             worker = json.loads(raw)["workers"].get(worker_id)
             if worker:
-                return project, worker
-        raise Refused(f"No worker {worker_id} is bound")
+                known = True
+                if hmac.compare_digest(worker["token"], token):
+                    return project, worker
+        raise Refused("This worker's token does not match" if known else f"No worker {worker_id} is bound")
 
     def checkout(self, config, path, pr):
         """The worker's checkout must be a clean worktree of the bound repository at the PR's head."""

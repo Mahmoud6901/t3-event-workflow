@@ -440,6 +440,30 @@ class FlowTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("token", result["error"])
 
+    def test_a_worker_reports_when_an_earlier_project_has_a_worker_with_the_same_id(self):
+        # Worker ids are counters per project, so two bound projects share them; the token tells them apart.
+        other = Path(self.tmp.name) / "other"
+        git(Path(self.tmp.name), "clone", str(self.origin), str(other))
+        first = {"projectId": "proj-0", "threadId": "thread-other"}
+        self.assertTrue(self.call({"op": "init", **first, "workspace": str(other), "repo": "owner/other",
+                                   "requiredChecks": ["acceptance"], "checks": [], "noChecksReason": "Test project"})["ok"])
+        self.assertTrue(self.call({"op": "control", **first, "action": "activate",
+                                   "authorization": "Activate the workflow."})["ok"])
+        self.assertTrue(self.call({"op": "queue_set", **first, "plans": [{"plan": "M1", "owns": ["src/"], "tasks": [
+            {"task": "Another task", "brief": "Do another task."}]}]})["ok"])
+        (theirs,) = self.call({"op": "next", **first})["calls"]
+        self.bind()
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertEqual(call["worker"], theirs["worker"])
+        worker, token, tree = self.implement(call, "export const name = 1;\n", 7)
+        result = self.worker("pr", worker, token, "--pr", "7", path=tree)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["state"], "review_needed")
+        wrong = self.worker("pr", worker, "0" * 32, "--pr", "7", path=tree)
+        self.assertFalse(wrong["ok"])
+        self.assertIn("token", wrong["error"])
+
     def to_review(self, content="export const name = 1;\n", number=7, files=("src/login.ts",), owns=("src/",), devops=None):
         """One task queued, implemented and in review. Returns (implementer call, reviewer call, worktree)."""
         self.bind(**({} if devops is None else {"devops": devops}))
