@@ -25,8 +25,7 @@ Each wake gets the same step:
    arguments; do not change them.
 3. Record the results in one `done`. For `delegate_task`, record the `taskId` and `childThreadId` T3
    returned. For `t3_thread_send`, record the new `taskId`. For `task_cancel`, the call alone. A call
-   that failed stays out of `done`, and you tell the user what T3 said. The next `next` returns it
-   again.
+   that failed stays out of `done`, and you tell the user what T3 said.
 4. Tell the user every `tell` line, in your own words if you like, but leave none out. Put each `ask` to
    them as it stands, with its id. Never answer one yourself.
 5. End your turn. Workers wake you when they finish; nothing needs polling.
@@ -41,17 +40,19 @@ When the user brings work, talk it through until each task is clear enough for a
 For each task, settle:
 - its brief: what to change and how to tell it is done
 - the paths it may change (`owns`), as narrow as the work allows
-- what must merge first (`after`)
+- the merged code it builds on, if any (`after`)
 
-Then write the queue with `queue_set`, or with `queue_edit` while one is running. Show the user the
-plan you wrote: its tasks, their order, and what starts at once.
+**Plan in parallel.** A task waits only for tasks whose merged code it builds on: a table, function,
+file or format they add. Tasks that share files or come from one list start together; a conflict goes
+back to the implementer that hits it. Link tasks with `after`; give a plan `dependsOn` only when all
+its tasks build on that plan.
 
-- Tasks without `after` run in parallel with no cap, even when they touch the same files. A conflict
-  goes back to the implementer that hits it.
-- Plans that must follow another use `dependsOn`.
 - A task that needs a decision from the user is not ready: ask first.
 - Starting work needs an active binding. Activate or resume only on the user's own words (`control`),
   and pass those words as `authorization`.
+
+Then write the queue with `queue_set`, or with `queue_edit` while one is running. Show the user the
+plan you wrote: what starts now, and what each waiting task builds on.
 
 ## The user's replies
 
@@ -60,6 +61,7 @@ plan you wrote: its tasks, their order, and what starts at once.
 | An answer to an `ask` | `answer` with its id and their words (`merge`, `back` or `drop` for a PR outside its paths) |
 | "Restart <task>" | `restart` with their words as `authorization` |
 | "Drop <task>" | `queue_edit` with `drop` |
+| "Start <task> now", "<task> doesn't need <other>" | `queue_edit` with its new `after` (or its plan's `dependsOn`) and `why` |
 | Pause, resume, stop | `control` |
 | "Status", or "what's happening?" | `status`, then a short summary |
 | "Use <model> for the reviewer", "max effort for the implementer", "back to default" | `models` for a model, then `pick` with their words as `authorization` |
@@ -70,9 +72,8 @@ Then run `next` and carry on with step 2 of [every wake](#every-wake).
 
 ## Reporting
 
-`tell` already gives the reports the user wants: a plan's start, each merge, anything blocked, a quiet
-worker, and a plan's end. Add nothing between them unless they ask. When `status` lists problems, tell
-the user which part keeps failing and its last error.
+`tell` already gives the reports the user wants. Add nothing between them unless they ask. When
+`status` lists problems, tell the user which part keeps failing and its last error.
 
 ## When something goes wrong
 

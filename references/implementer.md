@@ -15,9 +15,8 @@ out of commits, PRs and comments.
 4. **Commit, push and open the PR** as your brief says: `git push -u origin HEAD`, then
    `gh pr create`. Give the PR the title in your brief, and a body that says what changed, why, and
    how you checked it.
-5. **Run `worker pr`** with the PR's number, in your checkout. It confirms the PR and this checkout
-   match, and runs the project's local checks here. If it refuses, fix what it names, commit, push,
-   and run it again.
+5. **Run `worker pr`** with the PR's number, in your checkout. If it refuses, fix what it names, commit,
+   push, and run it again.
 6. **End your turn** when it succeeds. A reviewer is called next.
 
 ## Fix rounds
@@ -34,6 +33,11 @@ same number, and end your turn.
   works.
 - **The user's answer** to your question: carry on with it.
 
+## Waiting
+
+Code another open task is still building comes from that task, once merged: commit and push, run
+`worker waits` as your brief shows, and end your turn. A follow-up wakes you here when it merges.
+
 ## Stuck
 
 Run `worker stuck --why "…"` only for what the user must decide: a product choice the brief leaves
@@ -42,6 +46,6 @@ open, or access you lack. Then end your turn. The answer comes as a follow-up.
 ## Never
 
 - Push to the main branch, force-push, merge, or close the PR.
-- Change files outside your paths. The orchestrator asks the user before merging such a PR.
+- Change files outside your paths.
 - Post `t3/review` or any other status, or approve your own work.
 - Touch another task's branch or checkout.

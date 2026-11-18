@@ -158,6 +158,15 @@ class HomeTests(unittest.TestCase):
         self.assertFalse(wrong["ok"])
         self.assertIn(f"No worker {worker}", wrong["error"])
 
+    def test_a_worker_flag_given_twice_reaches_the_projects_own_copy_twice(self):
+        args = harness.parser().parse_args(["worker", "waits", "--worker", "w2", "--token", "t", "--on", "Add a footer",
+                                            "--on", "Add a header", "--why", "src/footer.ts has no footer yet"])
+        with patch.object(homes, "holder", return_value=self.homes / "app"), \
+                patch.object(homes, "run", side_effect=lambda home, argv: {"ok": True, "argv": argv}):
+            passed = harness.forward(args, None, self.homes)
+        self.assertIn("--on=Add a footer", passed["argv"])
+        self.assertIn("--on=Add a header", passed["argv"])
+
 
 if __name__ == "__main__":
     unittest.main()

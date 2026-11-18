@@ -920,6 +920,213 @@ class FlowTests(unittest.TestCase):
         self.assertEqual((cancel["tool"], cancel["arguments"]["taskId"]), ("task_cancel", self.runs[first["call"]]))
         self.assertIn("Use the new name", freed["arguments"]["task"])
 
+    def test_a_relink_off_an_unmerged_task_needs_why_which_its_implementer_and_status_see_and_the_user_is_not_told(self):
+        self.bind()
+        self.queue("Fix the login typo", {"task": "Use the new name", "brief": "Use it.", "after": ["Fix the login typo"]})
+        self.start()
+        refused = self.orchestrator("queue_edit", task="Use the new name", after=[])
+        self.assertFalse(refused["ok"])
+        self.assertIn("why", refused["error"])
+        why = "It only renames the call site; it uses no code from the typo fix."
+        self.assertTrue(self.orchestrator("queue_edit", task="Use the new name", after=[], why=why)["ok"])
+        (second,) = self.start()
+        brief = second["arguments"]["task"]
+        self.assertIn("Use the new name", brief)
+        self.assertIn(why, brief)
+        self.assertIn("worker waits", brief)
+        self.assertIn("Fix the login typo (M30)", brief, "the open tasks it could wait for")
+        self.assertFalse(any("Fix the login typo" in line for line in self.last_step["tell"]), self.last_step["tell"])
+        row = next(t for t in self.status()["tasks"] if t["task"] == "Use the new name")
+        self.assertEqual([(u["task"], u["why"]) for u in row["unlinked"]], [("t1", why)])
+
+    def test_a_relink_off_an_unfinished_plan_needs_why_and_its_tasks_briefs_carry_it(self):
+        self.bind()
+        self.assertTrue(self.orchestrator("queue_set", plans=[
+            {"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo", "brief": "Fix it."}]},
+            {"plan": "M31", "owns": ["src/"], "dependsOn": ["M30"], "tasks": [{"task": "Add a footer", "brief": "Add it."}]},
+        ])["ok"])
+        (first,) = self.start()
+        self.assertIn("Fix the login typo", first["arguments"]["task"])
+        refused = self.orchestrator("queue_edit", plan="M31", dependsOn=[])
+        self.assertFalse(refused["ok"])
+        self.assertIn("why", refused["error"])
+        why = "M31 changes only the footer; nothing in it calls M30's code."
+        self.assertTrue(self.orchestrator("queue_edit", plan="M31", dependsOn=[], why=why)["ok"])
+        (footer,) = self.start()
+        self.assertIn("Add a footer", footer["arguments"]["task"])
+        self.assertIn(why, footer["arguments"]["task"])
+
+    def work(self, call, files=None, push=True):
+        """An implementer's work in progress in its own worktree, no PR yet: files committed and, unless push is False,
+        pushed. Returns (worker, token, worktree)."""
+        worker, token = worker_command(call)
+        tree = Path(self.tmp.name) / f"wt-{worker}"
+        git(self.workspace, "worktree", "add", "-b", f"t3/{worker}", str(tree), "origin/main")
+        for name, content in (files or {}).items():
+            (tree / name).write_text(content)
+            git(tree, "add", name)
+        if files:
+            git(tree, "commit", "-m", f"work of {worker}")
+            if push:
+                git(tree, "push", "-u", "origin", "HEAD")
+        return worker, token, tree
+
+    def merge_task(self, call, content, number):
+        """The task this call started is implemented, reviewed, approved and merged by DevOps."""
+        w, t, tree = self.implement(call, content, number)
+        self.assertTrue(self.worker("pr", w, t, "--pr", str(number), path=tree)["ok"])
+        (review,) = self.start()
+        head = git(tree, "rev-parse", "HEAD")
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve", "--sha", head)["ok"])
+        (devops_call,) = self.start()
+        devops = worker_command(devops_call)
+        self.worker("take", *devops)
+        self.green(head)
+        self.assertTrue(self.worker("merge", *devops)["ok"])
+
+    def test_an_implementer_that_needs_another_tasks_code_waits_and_the_same_one_carries_on_after_it_merges(self):
+        self.bind()
+        self.queue("Fix the login typo", "Use the new name")  # Parallel: nobody declared the link.
+        first, second = self.start()
+        w2, t2, tree2 = self.work(second, {"src/use.ts": "export const use = 1;\n"})
+        why = "src/login.ts has no name export yet"
+        waits = self.worker("waits", w2, t2, "--on", "Fix the login typo", "--why", why, path=tree2)
+        self.assertTrue(waits["ok"], waits)
+        self.assertEqual(waits["state"], "waiting")
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing", "waiting"])
+        self.end(second)
+        step = self.orchestrator("next")
+        self.assertEqual(step["calls"], [], "it reported: no nudge, no second implementer")
+        self.assertEqual(step["tell"], [], "nothing for the user")
+        row = next(t for t in self.status()["tasks"] if t["task"] == "Use the new name")
+        self.assertEqual([(n["task"], n["why"]) for n in row["needed"]], [("t1", why)])
+        self.merge_task(first, "export const name = 1;\n", 7)
+        (resume,) = self.start()
+        self.assertEqual((resume["tool"], resume["arguments"]["threadId"]), ("t3_thread_send", f"child-{w2}"))
+        for words in ("Fix the login typo merged.", "git merge origin/main", "worker pr"):
+            self.assertIn(words, resume["arguments"]["message"])
+        refused = self.worker("waits", w2, t2, "--on", "Fix the login typo", "--why", why, path=tree2)
+        self.assertFalse(refused["ok"])
+        self.assertIn("merged", refused["error"])
+        git(tree2, "fetch", "origin")
+        git(tree2, "merge", "--no-edit", "origin/main")
+        git(tree2, "push")
+        self.hub.open(8, f"t3/{w2}", ["src/use.ts"])
+        self.assertTrue(self.worker("pr", w2, t2, "--pr", "8", path=tree2)["ok"])
+        (review,) = self.start()
+        self.assertIn(f"This task waited for Fix the login typo ({why})", review["arguments"]["task"])
+
+    def test_waits_refuses_what_would_skip_or_stall_the_work_and_changes_nothing(self):
+        self.bind()
+        self.queue("Fix the login typo", {"task": "Use the new name", "brief": "Use it.", "after": ["Fix the login typo"]},
+                   "Add a footer", "Add a header")
+        first, _, _ = self.start()
+        w1, t1, tree1 = self.work(first)
+        self.assertTrue(self.orchestrator("queue_edit", drop="Add a header")["ok"])
+        for on, why, words in (("Fix the login typo", "src/login.ts", "its own"),
+                               ("Use the new name", "src/use.ts has no use export", "forever"),
+                               ("Add a footer", "it needs the footer", "file"),
+                               ("Add a header", "src/header.ts has no header", "worker stuck")):
+            refused = self.worker("waits", w1, t1, "--on", on, "--why", why, path=tree1)
+            self.assertFalse(refused["ok"], on)
+            self.assertIn(words, refused["error"])
+        (tree1 / "src" / "login.ts").write_text("export const name = 1;\n")
+        why = "src/footer.ts has no footer export"
+        refused = self.worker("waits", w1, t1, "--on", "Add a footer", "--why", why, path=tree1)
+        self.assertFalse(refused["ok"])
+        self.assertIn("uncommitted", refused["error"])
+        git(tree1, "commit", "-am", "work")
+        refused = self.worker("waits", w1, t1, "--on", "Add a footer", "--why", why, path=tree1)
+        self.assertFalse(refused["ok"])
+        self.assertIn("push", refused["error"])
+        self.assertEqual(next(t for t in self.status()["tasks"] if t["task"] == "Fix the login typo")["state"], "implementing")
+
+    def test_a_link_its_implementer_put_back_comes_off_only_when_the_user_says_so(self):
+        self.bind()
+        self.queue("Fix the login typo", "Use the new name")
+        _, second = self.start()
+        w2, t2, tree2 = self.work(second)
+        self.assertTrue(self.worker("waits", w2, t2, "--on", "Fix the login typo", "--why",
+                                    "src/login.ts has no name export yet", path=tree2)["ok"])
+        why = "It can use the old name for now."
+        refused = self.orchestrator("queue_edit", task="Use the new name", after=[], why=why)
+        self.assertFalse(refused["ok"])
+        self.assertIn("authorization", refused["error"])
+        self.assertTrue(self.orchestrator("queue_edit", task="Use the new name", after=[], why=why,
+                                          authorization="Let it start now with the old name.")["ok"])
+        (resume,) = self.start()
+        self.assertEqual(resume["arguments"]["threadId"], f"child-{w2}")
+        self.assertIn(f"The user let this task go on without Fix the login typo: {why}", resume["arguments"]["message"])
+        (tree2 / "src" / "use.ts").write_text("export const use = 'old name';\n")
+        git(tree2, "add", ".")
+        git(tree2, "commit", "-m", "use the old name")
+        git(tree2, "push", "-u", "origin", "HEAD")
+        self.hub.open(8, f"t3/{w2}", ["src/use.ts"])
+        self.assertTrue(self.worker("pr", w2, t2, "--pr", "8", path=tree2)["ok"])
+        (review,) = self.start()
+        self.assertIn(f"The user let this task go on without Fix the login typo: {why}", review["arguments"]["task"])
+        self.assertNotIn("request changes and name it", review["arguments"]["task"], "the user allowed a stand-in")
+
+    def test_a_waiting_task_whose_needed_task_is_dropped_is_told_so_and_waits_only_once(self):
+        self.bind()
+        self.queue("Fix the login typo", "Use the new name", "Add a footer")
+        first, second, _ = self.start()
+        w2, t2, tree2 = self.work(second)
+        self.assertTrue(self.worker("waits", w2, t2, "--on", "Fix the login typo", "--why",
+                                    "src/login.ts has no name export yet", path=tree2)["ok"])
+        self.assertTrue(self.orchestrator("queue_edit", drop="Fix the login typo")["ok"])
+        cancel, resume = self.start()
+        self.assertEqual((cancel["tool"], cancel["arguments"]["taskId"]), ("task_cancel", self.runs[first["call"]]))
+        self.assertEqual(resume["arguments"]["threadId"], f"child-{w2}")
+        self.assertIn("Fix the login typo was dropped", resume["arguments"]["message"])
+        self.assertIn("worker stuck", resume["arguments"]["message"])
+        again = self.worker("waits", w2, t2, "--on", "Add a footer", "--why", "src/footer.ts has no footer", path=tree2)
+        self.assertFalse(again["ok"])
+        self.assertIn("once", again["error"])
+        self.assertIn("worker stuck", again["error"])
+
+    def test_queue_edit_refuses_a_relink_that_would_wait_forever_and_changes_nothing(self):
+        self.bind()
+        self.assertTrue(self.orchestrator("control", action="pause")["ok"])
+        self.assertTrue(self.orchestrator("queue_set", plans=[
+            {"plan": "M30", "owns": ["src/"], "tasks": [
+                {"task": "Fix the login typo", "brief": "Fix it."},
+                {"task": "Use the new name", "brief": "Use it.", "after": ["Fix the login typo"]}]},
+            {"plan": "M31", "owns": ["src/"], "dependsOn": ["M30"], "tasks": [{"task": "Add a footer", "brief": "Add it."}]},
+        ])["ok"])
+        for edit in ({"task": "Fix the login typo", "after": ["Fix the login typo"]},
+                     {"task": "Fix the login typo", "after": ["Use the new name"]},
+                     {"task": "Fix the login typo", "after": ["Add a footer"]},
+                     {"plan": "M30", "dependsOn": ["M31"]}):
+            refused = self.orchestrator("queue_edit", **edit)
+            self.assertFalse(refused["ok"], edit)
+            self.assertIn("forever", refused["error"])
+        self.assertTrue(self.orchestrator("control", action="resume", authorization="Go on.")["ok"])
+        (first,) = self.start()
+        self.assertIn("Fix the login typo", first["arguments"]["task"])
+
+    def test_queue_edit_leaves_the_links_of_a_started_task_as_they_are(self):
+        self.bind()
+        self.queue("Fix the login typo", "Add a footer")
+        self.start()
+        refused = self.orchestrator("queue_edit", task="Fix the login typo", after=["Add a footer"])
+        self.assertFalse(refused["ok"])
+        self.assertIn("already started", refused["error"])
+
+    def test_status_shows_what_each_task_and_plan_waits_for(self):
+        self.bind()
+        self.assertTrue(self.orchestrator("queue_set", plans=[
+            {"plan": "M30", "owns": ["src/"], "tasks": [
+                {"task": "Fix the login typo", "brief": "Fix it."},
+                {"task": "Use the new name", "brief": "Use it.", "after": ["Fix the login typo"]}]},
+            {"plan": "M31", "owns": ["src/"], "dependsOn": ["M30"], "tasks": [{"task": "Add a footer", "brief": "Add it."}]},
+        ])["ok"])
+        status = self.status()
+        names = {t["id"]: t["task"] for t in status["tasks"]}
+        self.assertEqual({t["task"]: [names[a] for a in t["after"]] for t in status["tasks"]},
+                         {"Fix the login typo": [], "Use the new name": ["Fix the login typo"], "Add a footer": []})
+        self.assertEqual(status["dependsOn"], {"M31": ["M30"]})
+
     def test_setup_github_needs_your_words_and_reports_what_it_changed(self):
         self.bind()
         self.assertFalse(self.orchestrator("setup_github")["ok"])

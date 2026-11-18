@@ -270,6 +270,32 @@ def next_id(state, prefix):
     return f"{prefix}{state['seq']}"
 
 
+def loops(graph):
+    """Whether following graph's edges (node -> nodes) from some node leads back to it."""
+    done, path = set(), set()
+
+    def visit(node):
+        if node in path:
+            return True
+        if node in done:
+            return False
+        path.add(node)
+        found = any(visit(n) for n in graph.get(node, ()))
+        path.discard(node)
+        done.add(node)
+        return found
+    return any(visit(node) for node in list(graph))
+
+
+def waits_forever(state):
+    """Plans that wait for each other, or waiting tasks that do, through `after` or their plan's `dependsOn`."""
+    unfinished = {t["id"] for t in state["tasks"].values() if t["state"] not in {"merged", "dropped"}}
+    tasks = {t["id"]: (set(t["after"]) | {o["id"] for o in state["tasks"].values()
+                                          if o["plan"] in state["plans"][t["plan"]]["dependsOn"]}) & unfinished
+             for t in state["tasks"].values() if t["state"] == "waiting"}
+    return loops({name: set(p["dependsOn"]) for name, p in state["plans"].items()}) or loops(tasks)
+
+
 class Flow:
     def __init__(self, db_path=DEFAULT_DB, hub=None, jev=None):
         self.path = Path(db_path).resolve()
@@ -452,7 +478,8 @@ class Flow:
         return list(names.values())
 
     def queue_edit(self, project, req):
-        """Change a running queue: new plans, new tasks for a plan (a done plan opens again), or drop a task."""
+        """Change a running queue: new plans, new tasks for a plan (a done plan opens again), drop a task, or relink:
+        replace a waiting task's `after` or a plan's `dependsOn`, unless that makes a loop."""
         def change(config, state):
             result = {}
             for plan in req.get("plans") or []:
@@ -470,9 +497,57 @@ class Flow:
                         f"DevOps is merging {task['id']}; drop it after, or restart DevOps")
                 self.drop(state, task, "you dropped it")
                 result["dropped"] = task["id"]
-            require(result, "queue_edit takes plans, tasks with plan, or drop")
+            if req.get("task"):
+                task = state["tasks"][self.task_id(state, text(req["task"], "task"))]
+                require(task["state"] == "waiting", f"{task['id']} already started ({task['state']}); only a waiting "
+                                                    "task's links can change")
+                after = req.get("after")
+                require(isinstance(after, list), "after lists the tasks it waits for; [] for none")
+                new = [self.task_id(state, a) for a in after]
+                self.unlink(state, task, [a for a in task["after"] if a not in new], req)
+                task["after"] = new
+                result.setdefault("relinked", []).append({"task": task["id"], "after": task["after"]})
+            if "dependsOn" in req:
+                name = text(req.get("plan"), "plan")
+                require(name in state["plans"], f"No plan {name} is queued")
+                depends = req["dependsOn"]
+                require(isinstance(depends, list) and all(d in state["plans"] for d in depends),
+                        f"Plan {name}: dependsOn lists queued plans; [] for none")
+                gone = [p for p in state["plans"][name]["dependsOn"]
+                        if p not in depends and state["plans"][p]["status"] != "done"]
+                if gone:
+                    why = text(req.get("why"), f"why (what of plan {', '.join(gone)} its tasks do not need)")
+                    for task in state["tasks"].values():
+                        if task["plan"] == name and task["state"] == "waiting":
+                            task.setdefault("unlinked", []).extend({"plan": p, "why": why, "at": now()} for p in gone)
+                            self.move(task, "waiting", f"its plan no longer waits for {', '.join(gone)}: {why}")
+                state["plans"][name]["dependsOn"] = depends
+                result.setdefault("relinked", []).append({"plan": name, "dependsOn": depends})
+            require(not (result.get("relinked") and waits_forever(state)),
+                    "That link makes a loop: the tasks in it would wait for each other forever")
+            require(result, "queue_edit takes plans, tasks with plan, drop, task with after, or plan with dependsOn")
             return result
         return self.transact(project, change, "queue_edit")
+
+    def unlink(self, state, task, removed, req):
+        """Links queue_edit takes off a waiting task. One to unfinished work needs `why`, kept for the task's implementer,
+        its reviewer and status. One its implementer put back with worker waits stays unless the user asks: then their
+        own words come as `authorization`."""
+        unfinished = [a for a in removed if state["tasks"][a]["state"] not in {"merged", "dropped"}]
+        if not unfinished:
+            return
+        names = ", ".join(state["tasks"][a]["task"] for a in unfinished)
+        why = text(req.get("why"), f"why (what of {names} it does not need)")
+        needed = {n["task"]: n for n in task.get("needed") or []}
+        words = req.get("authorization")
+        for a in unfinished:
+            if a in needed:
+                require(isinstance(words, str) and words.strip(), (
+                    f"Its implementer found it needs {needed[a]['name']} ({needed[a]['why']}), so the link stays and "
+                    "the task waits. Only if the user themselves asks to start it now, pass their words as authorization."))
+            task.setdefault("unlinked", []).append({"task": a, "name": state["tasks"][a]["task"], "why": why, "at": now(),
+                                                    **({"authorization": words.strip()} if a in needed else {})})
+        self.move(task, "waiting", f"no longer waits for {', '.join(unfinished)}: {why}")
 
     def setup_github(self, project, req):
         """Squash-only merges and main's protection on the bound repo, on your word. Reports what it changed."""
@@ -492,7 +567,8 @@ class Flow:
     def next(self, project, req):
         self.harness_merges(project)
         config, state = self.load(project)
-        ready = {t["id"] for t in state["tasks"].values() if t["state"] == "waiting" and self.unblocked(state, t)}
+        ready = {t["id"] for t in state["tasks"].values()
+                 if t["state"] == "waiting" and self.unblocked(state, t) and not self.parked(state, t)}
         choices, facts = {}, {}
         if state["control"] == "active":
             gh = self.hub_for(config["github"]["repo"])
@@ -522,7 +598,9 @@ class Flow:
                     self.settle(state, worker)
             if state["control"] == "active":
                 for task in state["tasks"].values():
-                    if task["state"] == "waiting" and self.unblocked(state, task):
+                    if task["state"] == "waiting" and self.unblocked(state, task) and self.parked(state, task):
+                        self.resume(config, state, task)
+                    elif task["state"] == "waiting" and self.unblocked(state, task):
                         self.start_implementer(config, state, task, choices.get(task["id"]))
                     elif task["state"] == "review_needed":
                         self.start_reviewer(config, state, task)
@@ -739,7 +817,9 @@ class Flow:
         config, state = self.load(project)
         return {"control": state["control"], "repo": config["github"]["repo"],
                 "plans": {name: p["status"] for name, p in state["plans"].items()},
-                "tasks": [{k: t.get(k) for k in ("id", "plan", "task", "state", "pr", "head")} for t in state["tasks"].values()],
+                "dependsOn": {name: p["dependsOn"] for name, p in state["plans"].items() if p["dependsOn"]},
+                "tasks": [{k: t.get(k) for k in ("id", "plan", "task", "state", "after", "unlinked", "needed", "pr", "head")}
+                          for t in state["tasks"].values()],
                 "working": sorted(w["id"] for w in state["workers"].values() if w["state"] == "working"),
                 "models": {role: role_model(config, state, role) for role in ROLES}, "devops": state.get("devopsOn", True),
                 "pendingCalls": len(state["calls"]), "openAsks": [a for a in state["asks"].values() if not a.get("answered")],
@@ -749,6 +829,30 @@ class Flow:
         plan = state["plans"][task["plan"]]
         return (all(state["plans"][p]["status"] == "done" for p in plan["dependsOn"])
                 and all(state["tasks"][a]["state"] in {"merged", "dropped"} for a in task["after"]))
+
+    def parked(self, state, task):
+        """The implementer of a task that waits since it ran worker waits, while a follow-up can still reach it."""
+        worker = state["workers"].get(task.get("implementer")) if task["state"] == "waiting" and task.get("needed") else None
+        return worker if worker and worker["state"] != "cancelled" and worker["childThreadId"] else None
+
+    def resume(self, config, state, task):
+        """What a parked task waited for is settled: merged, dropped, or the user let it go on without it. Its own
+        implementer carries on in the same checkout."""
+        me = f"--worker {task['implementer']} --token {state['workers'][task['implementer']]['token']}"
+        lines = []
+        for need in task["needed"]:
+            other = state["tasks"][need["task"]]
+            if other["state"] == "merged":
+                lines.append(f"{other['task']} merged.")
+            elif other["state"] == "dropped":
+                lines.append(f"{other['task']} was dropped, so its code is not coming. If this task cannot go on without "
+                             f"it, run {command('worker', 'stuck', me, '--why', QUESTION)} and end your turn.")
+            else:
+                why = next((u["why"] for u in reversed(task.get("unlinked") or []) if u.get("task") == other["id"]), "")
+                lines.append(f"The user let this task go on without {other['task']}: {why}")
+        task["fix"] = {"kind": "resume", "detail": " ".join(lines)}
+        self.move(task, "implementing", "what it waited for is settled")
+        self.send_fix(config, state, task)
 
     def move(self, task, to, note=None):
         task["history"].append({"at": now(), "from": task["state"], "to": to, **({"note": note} if note else {})})
@@ -792,7 +896,7 @@ class Flow:
         task["implementer"] = worker["id"]
         self.move(task, "implementing")
         self.delegate(config, state, worker, f"{task['plan']}: {task['task']}", "implementation", "worktree",
-                      implementer_brief(config, task, worker))
+                      implementer_brief(config, state, task, worker))
 
     def start_reviewer(self, config, state, task):
         worker = self.add_worker(config, state, "reviewer", task["plan"], task["id"], task.get("choice"))
@@ -840,13 +944,18 @@ class Flow:
         if not worker["childThreadId"]:
             return  # Its start is not confirmed yet.
         fix = task.pop("fix")
-        task["returned"] = fix["detail"]  # The next reviewer is told why the PR came back.
+        if fix["kind"] != "resume":
+            task["returned"] = fix["detail"]  # The next reviewer is told why the PR came back.
         worker["job"] = {"kind": "fix", "reported": False, "nudged": 0}
         me = f"--worker {worker['id']} --token {worker['token']}"
+        kept = task.get("pushedBranch")
         guide = {"review": f"Read the reviewer's comment (gh pr view {task.get('pr')} --comments) and address it.",
                  "conflict": f"Run git fetch origin && git merge origin/{config['branch']}, resolve the conflicts, commit.",
                  "ci": f"Read the failing CI run (gh pr checks {task.get('pr')}; gh run view <id> --log-failed) and fix it.",
-                 "moved": "Make sure this checkout is at the PR's head."}.get(fix["kind"], "")
+                 "moved": "Make sure this checkout is at the PR's head.",
+                 "resume": (f"Run git fetch origin && git merge origin/{config['branch']} in this checkout, then finish the "
+                            "task." + (f" If this checkout lost your work, first run git fetch origin && git reset --hard "
+                                       f"origin/{kept}." if kept else ""))}.get(fix["kind"], "")
         if fix["kind"] == "ci" and not devops_on(state, task["plan"]):
             guide += (" If CI itself is broken, not this task's code, run "
                       + command("worker", "stuck", me, "--why", '"<what is broken>"') + " so the user decides, and end your turn.")
@@ -883,11 +992,13 @@ class Flow:
 
     def worker(self, command, args):
         project, worker = self.find_worker(args["worker"], args["token"])
-        handler = {"pr": self.pr, "stuck": self.stuck, "review": self.review, "take": self.take, "update": self.update,
-                   "merge": self.merge, "failed": self.failed, "pipeline": self.pipeline}.get(command)
+        handler = {"pr": self.pr, "stuck": self.stuck, "waits": self.waits, "review": self.review, "take": self.take,
+                   "update": self.update, "merge": self.merge, "failed": self.failed, "pipeline": self.pipeline}.get(command)
         require(handler, f"{command} is not available yet")
         if command in {"take", "update", "merge", "failed", "pipeline"}:
             require(worker["role"] == "devops", f"Only DevOps runs {command}")
+        if command == "waits":
+            require(worker["role"] == "implementer", "Only an implementer runs waits")
         return handler(project, worker, args)
 
     def find_worker(self, worker_id, token):
@@ -901,8 +1012,8 @@ class Flow:
                     return project, worker
         raise Refused("This worker's token does not match" if known else f"No worker {worker_id} is bound")
 
-    def checkout(self, config, path, pr):
-        """The worker's checkout must be a clean worktree of the bound repository at the PR's head."""
+    def own_checkout(self, config, path):
+        """The worker's checkout must be the top of a clean worktree of the bound repository."""
         tree = Path(path).resolve()
         top = Path(git(tree, "rev-parse", "--show-toplevel")).resolve()
         require(top == tree, f"{tree} is not the top of a git checkout")
@@ -910,9 +1021,26 @@ class Flow:
         bound = Path(config["workspace"], git(config["workspace"], "rev-parse", "--git-common-dir")).resolve()
         require(common == bound, f"{tree} is not a checkout of the bound repository {config['workspace']}")
         require(not git(tree, "status", "--porcelain"), f"{tree} has uncommitted changes; commit and push them first")
+        return tree
+
+    def checkout(self, config, path, pr):
+        """The worker's checkout must be a clean worktree of the bound repository at the PR's head."""
+        tree = self.own_checkout(config, path)
         head = git(tree, "rev-parse", "HEAD")
         require(head == pr["head"], f"{tree} is at {head[:12]} but PR #{pr['number']} is at {pr['head'][:12]}; push first")
         return str(tree)
+
+    def pushed(self, config, path):
+        """The worker's checkout holds nothing GitHub lacks: it is clean and its own commits are on a pushed branch.
+        Returns that branch, or None when it has no commits of its own."""
+        tree, main = self.own_checkout(config, path), f"origin/{config['branch']}"
+        if git(tree, "merge-base", "--is-ancestor", "HEAD", main, check=False)[0] == 0:
+            return None
+        found = git(tree, "for-each-ref", "--contains", "HEAD", "--format=%(refname:short)", "refs/remotes/origin").split()
+        branches = [b for b in found if b.startswith("origin/") and b not in {main, "origin/HEAD"}]
+        require(branches, f"{tree} has commits that are not pushed; push them (git push -u origin HEAD) first")
+        upstream = git(tree, "rev-parse", "--abbrev-ref", "@{u}", check=False)[1]
+        return (upstream if upstream in branches else branches[0]).removeprefix("origin/")
 
     def run_checks(self, config, project, name, tree, head):
         """The binding's local checks in the worker's checkout; their logs go under state/harness-artifacts."""
@@ -973,6 +1101,51 @@ class Flow:
             self.move(task, "blocked", "the implementer is stuck")
             return {"state": "blocked", "next": "Your question goes to the user; the answer comes as a follow-up. End your turn."}
         return self.transact(project, change, "stuck")
+
+    def waits(self, project, worker, args):
+        """The implementer needs code another open task is still building. Its task waits for that task again, and the
+        same implementer carries on when it merges. Its work must be pushed first, and a task waits only once."""
+        why = text(args.get("why"), "--why (the file you need and what in it)")
+        on = [text(o, "--on") for o in args.get("on") or []]
+        require(on, "--on names the task whose code you need")
+        config, _ = self.load(project)
+        kept = self.pushed(config, args.get("path") or Path.cwd())
+
+        def change(config, state):
+            task = state["tasks"].get(worker["task"])
+            require(task and task.get("implementer") == worker["id"] and task["state"] == "implementing",
+                    "This task is not waiting on you")
+            stuck = command("worker", "stuck", f"--worker {worker['id']} --token {worker['token']}", "--why", QUESTION)
+            needs = []
+            for name in on:
+                other = state["tasks"][self.task_id(state, name)]
+                require(other["id"] != task["id"], f"{other['task']} is its own task: build what it needs here")
+                require(other["state"] != "merged", (
+                    f"{other['task']} already merged as {(other.get('mergeCommit') or '')[:12]}: run git fetch origin && "
+                    f"git merge origin/{config['branch']}, then carry on"))
+                require(other["state"] != "dropped", (
+                    f"{other['task']} was dropped, so its code is not coming; if this task cannot go on without it, "
+                    f"run {stuck}"))
+                require(any(owned(p, other["owns"]) for p in named_paths(why)), (
+                    f"--why must name the file you need from {other['task']}, inside its paths ({', '.join(other['owns'])}), "
+                    f"and what in it, for example \"{other['owns'][0].rstrip('/')}/name.ts has no exportName yet\""))
+                needs.append(other)
+            require(not task.get("needed"), (
+                f"This task already waited once, for {', '.join(n['name'] for n in task.get('needed') or [])}. If it needs code no "
+                f"open task will build, run {stuck}"))
+            task["after"] = task["after"] + [o["id"] for o in needs if o["id"] not in task["after"]]
+            task["needed"] = [{"task": o["id"], "name": o["task"], "why": why, "at": now()} for o in needs]
+            if kept:
+                task["pushedBranch"] = kept
+            state["workers"][worker["id"]]["job"]["reported"] = True
+            self.move(task, "waiting", f"its implementer needs {', '.join(o['id'] for o in needs)}: {why}")
+            require(not waits_forever(state), (
+                f"That would wait forever: {', '.join(o['task'] for o in needs)} waits for this task, directly or "
+                "through others"))
+            names = " and ".join(o["task"] for o in needs)
+            return {"state": "waiting", "next": f"When {names} {'merge' if len(needs) > 1 else 'merges'}, a follow-up "
+                                                "wakes you here to carry on. End your turn."}
+        return self.transact(project, change, "waits")
 
     def submitted(self, config, project, name, args):
         """A worker's PR as it stands: open against the bound branch, the worker's clean checkout at its head, and the
@@ -1343,7 +1516,44 @@ class Flow:
         state["tell"].append(f"Plan {name} done: {merged} merged{f', {dropped} dropped' if dropped else ''}.")
 
 
-def implementer_brief(config, task, worker):
+def named_paths(words):
+    """The file paths a worker's words name: a word with a slash or a file extension."""
+    found = re.findall(r"[\w.\-/]+", words.replace("\\", "/"))
+    return [w.strip("./") or w for w in found if "/" in w.strip("/") or re.search(r"\w\.\w+$", w)]
+
+
+def unlinked_lines(task, implementer):
+    """Why the task starts without waiting for work it once waited for."""
+    lines = []
+    for u in task.get("unlinked") or []:
+        what = f"plan {u['plan']}" if u.get("plan") else u["name"]
+        if implementer:
+            lines.append(f"This task once waited for {what}; it starts early because: {u['why']} Check that first.")
+        elif u.get("authorization"):
+            lines.append(f"The user let this task go on without {what}: {u['why']}")
+        else:
+            lines.append(f"This task started without waiting for {what}: {u['why']} If the PR stubs, fakes or copies "
+                         f"code that {what} builds, request changes and name it.")
+    return lines
+
+
+def waits_line(state, task, me):
+    """How an implementer waits for another open task's code, with the tasks it could name."""
+    others = sorted((t for t in state["tasks"].values() if t["id"] != task["id"] and t["state"] not in {"merged", "dropped"}),
+                    key=lambda t: t["plan"] != task["plan"])  # Its own plan first.
+    if not others:
+        return None
+    listed = ", ".join(f"{t['id']} {t['task']} ({t['plan']})" for t in others[:20])
+    more = f", and {len(others) - 20} more" if len(others) > 20 else ""
+    return (f"If your work needs code another open task is still building, do not stub, fake or copy it: commit and push "
+            f"what you have, run {command('worker', 'waits', me, '--on', TASK, '--why', NEED)} and end your turn. When "
+            f"that task merges, a follow-up wakes you here to carry on. Open tasks: {listed}{more}.")
+
+
+TASK, NEED = '"<task>"', '"<the file you need and what in it>"'
+
+
+def implementer_brief(config, state, task, worker):
     branch = config["branch"]
     me = f"--worker {worker['id']} --token {worker['token']}"
     if task.get("pr"):  # A restart: the work so far is on the PR's branch.
@@ -1359,13 +1569,15 @@ def implementer_brief(config, task, worker):
         f"Plan: {task['plan']}. Task: {task['task']}.",
         f"Brief: {task['brief'] or task['task']}",
         f"Paths you may change: {', '.join(task['owns'])}.",
+        *unlinked_lines(task, implementer=True),
         start[0],
         f"Keep this checkout's branch name. Never push to {branch}, never force-push, never merge.",
         start[1],
         f"Then run: {command('worker', 'pr', me, '--pr', '<number>')}",
         "It runs the project's checks in this folder. If it refuses, fix what it names, push, and run it again. "
         "When it succeeds, end your turn.",
-        f"If you cannot go on, run {command('worker', 'stuck', me, '--why', QUESTION)} and end your turn.",
+        *filter(None, [waits_line(state, task, me)]),
+        f"If you cannot go on for another reason, run {command('worker', 'stuck', me, '--why', QUESTION)} and end your turn.",
     ])
 
 
@@ -1387,7 +1599,9 @@ def closing(worker, task):
     me = f"--worker {worker['id']} --token {worker['token']}"
     if worker["role"] == "implementer":
         return (command("worker", "pr", me, "--pr", str(task["pr"]) if task.get("pr") else "<number>")
-                + f" (or, if you cannot go on: {command('worker', 'stuck', me, '--why', QUESTION)})")
+                + f" (or, if you need code another open task is still building: "
+                  f"{command('worker', 'waits', me, '--on', TASK, '--why', NEED)}; "
+                  f"if you cannot go on for another reason: {command('worker', 'stuck', me, '--why', QUESTION)})")
     if worker["role"] == "reviewer":
         return command("worker", "review", me, "--verdict", "approve|changes", "--sha", task["head"])
     return (f"{command('worker', 'merge', me)} once CI passes on PR #{task['pr']}, or "
@@ -1455,6 +1669,10 @@ def reviewer_brief(config, task, worker):
         f"Plan: {task['plan']}. Task: {task['task']}.",
         f"Brief: {task['brief'] or task['task']}",
         f"Paths it may change: {', '.join(task['owns'])}.",
+        *[f"This task waited for {n['name']} ({n['why']}). If the PR stubs, fakes or copies code that {n['name']} "
+          f"builds, request changes and name it." for n in task.get("needed") or []
+          if not any(u.get("task") == n["task"] and u.get("authorization") for u in task.get("unlinked") or [])],
+        *unlinked_lines(task, implementer=False),
         f"Review PR #{task['pr']} ({task.get('url')}) at commit {head}, branch {task['branch']}.",
         f"The implementer's checkout is {tree}. Read and test there; change nothing in it: no edits, commits or pushes.",
         f"The change: git -C {tree} diff origin/{branch}...{head}",

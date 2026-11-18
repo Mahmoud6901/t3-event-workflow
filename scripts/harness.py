@@ -76,11 +76,13 @@ def parser():
                      help="Escape non-ASCII in the answer, for PowerShell, which decodes it with the console code page")
     sub = top.add_subparsers(dest="mode")
     worker = sub.add_parser("worker")
-    worker.add_argument("command", choices=["pr", "stuck", "review", "take", "update", "merge", "failed", "pipeline"])
+    worker.add_argument("command", choices=["pr", "stuck", "waits", "review", "take", "update", "merge", "failed",
+                                            "pipeline"])
     worker.add_argument("--worker", required=True)
     worker.add_argument("--token", required=True)
     worker.add_argument("--pr", type=int)
     worker.add_argument("--why")
+    worker.add_argument("--on", action="append", help="waits: a task whose code this one needs; repeat for several")
     worker.add_argument("--verdict", choices=["approve", "changes"])
     worker.add_argument("--sha")
     worker.add_argument("--cause", choices=["task", "pipeline"])
@@ -136,7 +138,8 @@ def forward(args, request, root):
         argv = [*ascii_flag, "worker", args.command]
         for key, value in vars(args).items():
             if key not in {"db", "input", "request", "op_base64", "ascii", "mode", "command"} and value is not None:
-                argv.append(f"--{key.replace('_', '-')}={value}")  # One word, so a value starting with - stays a value.
+                for one in value if isinstance(value, list) else [value]:  # --on repeats.
+                    argv.append(f"--{key.replace('_', '-')}={one}")  # One word, so a value starting with - stays a value.
         return homes.run(home, argv)
     project = request.get("projectId")
     home = homes.for_project(project, root) if isinstance(project, str) and project else None
