@@ -109,12 +109,17 @@ class HookTests(unittest.TestCase):
         self.message("What does the login page do?")
         self.assertIsNone(self.tool("Edit", file_path="src/x.ts"))
 
+    def saved(self, command):
+        """The operation the hook saved for the token its command names."""
+        token = re.search(r"--request ([0-9a-f]{32})$", command).group(1)
+        return json.loads((self.db.parent / harness.REQUESTS / f"{token}.json").read_text(encoding="utf-8"))
+
     def test_the_workflow_command_runs_the_harness_as_this_orchestrator(self):
         self.message("use t3 workflow: status")
         verdict = self.tool("Bash", command="t3-workflow '{\"op\":\"status\",\"projectId\":\"other\",\"threadId\":\"forged\"}'")
         self.assertEqual(self.decision(verdict), "allow")
         command = verdict["hookSpecificOutput"]["updatedInput"]["command"]
-        sent = json.loads(base64.b64decode(re.search(r"--op-base64 (\S+)", command).group(1)))
+        sent = self.saved(command)
         self.assertEqual((sent["op"], sent["projectId"], sent["threadId"]), ("status", PROJECT, ORCH))
         bash = shutil.which("bash")
         if bash:  # Claude Code's Bash tool runs Git Bash on Windows.
@@ -186,7 +191,7 @@ class HookTests(unittest.TestCase):
             command = verdict["hookSpecificOutput"]["updatedInput"][key]
             self.assertNotIn('"', command, "PowerShell treats a quoted first word as a string, not a command")
             self.assertIn("--ascii", command)
-            sent = json.loads(base64.b64decode(re.search(r"--op-base64 (\S+)", command).group(1)))
+            sent = self.saved(command)
             self.assertEqual((sent["op"], sent["threadId"]), ("status", ORCH))
         shell = shutil.which("powershell") or shutil.which("pwsh")
         if shell:  # Codex runs its shell commands in PowerShell on Windows.

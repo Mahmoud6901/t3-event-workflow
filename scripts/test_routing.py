@@ -4,6 +4,7 @@ from contextlib import closing
 import json
 import os
 from pathlib import Path
+import shlex
 import sqlite3
 import tempfile
 import unittest
@@ -98,6 +99,23 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("T3_WORKFLOW_ORCHESTRATOR", self.reason(self.call("Edit", file_path=str(self.workspace / "a.ts"))))
         context = self.call(None, hook="user_prompt_submit")["hookSpecificOutput"]["additionalContext"]
         self.assertIn(str(self.home / "references" / "orchestrator.md"), context)
+
+    def test_an_operation_of_any_size_runs_from_a_short_command_once(self):
+        # Claude Code runs a command inside a script of capped size, and a session's saved environment grows that
+        # script each time it resumes: the command names the operation instead of carrying it.
+        self.say("use t3 workflow: plan it")
+        brief = "Keep the login form as it is. " * 300
+        op = {"op": "queue_set", "plans": [{"plan": "M1", "owns": ["src/"], "tasks": [{"task": "Big brief", "brief": brief}]}]}
+        verdict = self.call("Bash", command=f"t3-workflow '{json.dumps(op)}'")
+        command = verdict["hookSpecificOutput"]["updatedInput"]["command"]
+        self.assertLess(len(command), 400)
+        argv = shlex.split(command)
+        self.assertEqual(argv[2], flow.slash(self.home / "scripts" / "harness.py"))
+        self.assertTrue(harness.run(argv[3:])["ok"])
+        status = harness.run(["--db", str(homes.database(self.home))], json.dumps(
+            {"op": "status", "projectId": "app", "threadId": "orch"}))
+        self.assertIn("Big brief", json.dumps(status))
+        self.assertFalse(harness.run(argv[3:])["ok"], "a command runs its operation once")
 
     def test_a_crash_inside_a_moved_project_fails_closed(self):
         self.say("use t3 workflow: status")

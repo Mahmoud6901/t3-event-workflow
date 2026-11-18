@@ -8,7 +8,6 @@ In the shared install, the hook first finds the session's project. Every T3 sess
 or worker, in every turn, stays inside its own project (fence.py); goose runs no hooks. A project with its own copy
 (homes.py) is then served by that copy's hook. Inside a bound workspace an error denies or blocks: fail closed.
 """
-import base64
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -23,6 +22,7 @@ SCRIPTS = Path(__file__).resolve().parent
 ROOT = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS))
 from fence import Fence, operation  # noqa: E402 - standard library only, like this file
+import harness  # noqa: E402
 import health  # noqa: E402 - standard library only, like this file
 import homes  # noqa: E402
 import places  # noqa: E402
@@ -143,17 +143,20 @@ def unquoted(word):
 
 
 def harness_command(config, thread_id, request, runtime="claude"):
-    """The harness command for this operation, as this binding's orchestrator whatever identity the request named."""
+    """The harness command for this operation, as this binding's orchestrator whatever identity the request named. The
+    operation waits beside the database and the command names it by a token, so the command stays short whatever its
+    size: Claude Code runs it inside a script of capped size, which a session's saved environment grows."""
     request = {**request, "projectId": config["projectId"], "threadId": thread_id}
     args = [sys.executable, "-B", str(SCRIPTS / "harness.py"), "--db", str(HARNESS_DB)]
-    encoded = base64.b64encode(json.dumps(request, ensure_ascii=False).encode("utf-8")).decode("ascii")
     if runtime == "codex":
         # PowerShell runs a bare path but treats a quoted first word as a string, and it decodes a program's output with
         # the console code page, so the answer comes back in ASCII.
-        return " ".join(unquoted(a) for a in args) + " --ascii --op-base64 " + encoded
-    if any(re.search(r"[\"'`$\r\n]", a) for a in args):
+        words = " ".join(unquoted(a) for a in args) + " --ascii"
+    elif any(re.search(r"[\"'`$\r\n]", a) for a in args):
         raise ValueError("Unsafe workflow command argument")
-    return " ".join('"' + a.replace("\\", "/") + '"' for a in args) + " --op-base64 " + encoded
+    else:
+        words = " ".join('"' + a.replace("\\", "/") + '"' for a in args)
+    return f"{words} --request {harness.save_request(HARNESS_DB, request)}"
 
 
 def shell_input(tool_input):
