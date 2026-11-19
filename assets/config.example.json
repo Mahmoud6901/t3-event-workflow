@@ -23,10 +23,10 @@
   "defaults": {
     "implementer": "gpt-6.2-sol",
     "implementerEffort": "xhigh",
-    "reviewer": "claude-sonnet-5-5",
+    "reviewer": "claude-opus-5-5",
     "reviewerEffort": "xhigh",
-    "devops": "claude-opus-5-5",
-    "devopsEffort": "xhigh"
+    "devops": "claude-sonnet-5-5",
+    "devopsEffort": "high"
   },
   "models": {
     "claude-haiku-5-5": {
@@ -48,7 +48,8 @@
       "provider": "claudeAgent",
       "tier": 2,
       "roles": [
-        "reviewer"
+        "reviewer",
+        "devops"
       ]
     },
     "gpt-6.2-astra": {

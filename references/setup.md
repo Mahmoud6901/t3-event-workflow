@@ -87,7 +87,7 @@ In Codex's PowerShell, pipe a here-string instead, and keep the JSON ASCII (writ
 | `requiredChecks` | The CI check names that must pass before a merge |
 | `checks` | Local checks `worker pr` runs, each `{"name","argv","cwd","timeoutSeconds"}`. Give `argv` as a list, not shell text; `cwd` is relative to the project folder. |
 | `noChecksReason` | Why there are no local checks, when `checks` is empty |
-| `defaults` | Models and efforts without the user's choice or Jev's answer: implementer GPT-6.2-Sol, reviewer Sonnet 5.5, DevOps Opus 5.5, each at `xhigh` |
+| `defaults` | Models and efforts without the user's choice or Jev's answer: implementer GPT-6.2-Sol and reviewer Opus 5.5, each at `xhigh`; DevOps Sonnet 5.5 at `high` |
 | `quietMinutes` | Minutes before the watcher reports a quiet worker (default 30) |
 | `picks` | The user's model and effort per role, from step 2 |
 | `devops` | `false` merges without a DevOps worker (default `true`), from step 2 |

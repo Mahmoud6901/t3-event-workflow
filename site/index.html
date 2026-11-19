@@ -97,8 +97,8 @@
   <div class="roles-cols">
     <p data-reveal style="--i:2"><b>The orchestrator</b> plans the work with you and reports back. It edits nothing: its hook lets it run only <code>t3-workflow</code>, so every change reaches your code through a worker and a pull request. It runs on any Claude or Codex model you pick in T3.</p>
     <p data-reveal style="--i:3"><b>An implementer</b> takes one task in its own T3 checkout, changes only that task’s paths, runs the project’s checks and opens one pull request. Review notes, conflicts and CI failures come back to the same implementer. By default, <span class="nw">GPT-6.1-Sol</span> at xhigh.</p>
-    <p data-reveal style="--i:4"><b>A reviewer</b> reads the pull request at one commit and changes nothing. It approves that exact commit with the <code>t3/review</code> status, or lists each blocking finding with its file and line. By default, <span class="nw">Sonnet 5.5</span> at xhigh.</p>
-    <p data-reveal style="--i:5"><b>DevOps</b> brings each confirmed pull request up to date, waits for CI and squash-merges it through GitHub. It owns the pipeline too, and fixes it in PRs of its own. Turn it off and the workflow merges with no model. By default, <span class="nw">Opus 5.5</span> at xhigh.</p>
+    <p data-reveal style="--i:4"><b>A reviewer</b> reads the pull request at one commit and changes nothing. It approves that exact commit with the <code>t3/review</code> status, or lists each blocking finding with its file and line. By default, <span class="nw">Opus 5.5</span> at xhigh.</p>
+    <p data-reveal style="--i:5"><b>DevOps</b> brings each confirmed pull request up to date, waits for CI and squash-merges it through GitHub. It owns the pipeline too, and fixes it in PRs of its own. Turn it off and the workflow merges with no model. By default, <span class="nw">Sonnet 5.5</span> at high.</p>
   </div>
 </section>
 
@@ -132,7 +132,7 @@
           <ul class="ui-rows">
             <li style="--r:4"><span class="row-main">Implementer</span><span class="row-mid">GPT-6.1-Sol · xhigh</span><span class="row-side">Jev</span></li>
             <li style="--r:5"><span class="row-main">Reviewer</span><span class="row-mid">Sonnet 5.5 · max</span><span class="row-side">Your pick</span></li>
-            <li style="--r:6"><span class="row-main">DevOps</span><span class="row-mid">Opus 5.5 · xhigh</span><span class="row-side">Default</span></li>
+            <li style="--r:6"><span class="row-main">DevOps</span><span class="row-mid">Sonnet 5.5 · high</span><span class="row-side">Default</span></li>
           </ul>
         </div>
         <div class="panel-part" data-part="workers">
@@ -338,7 +338,7 @@
     </details>
     <details name="faq" data-reveal style="--i:5">
       <summary>Which models do the workers use?</summary>
-      <div class="faq-answer"><p>You choose each role’s model and effort, separately, at setup or later. For what you leave open, Jev may advise an implementer’s or reviewer’s model. Otherwise the defaults apply: GPT-6.1-Sol for implementers, Sonnet 5.5 for reviewers and Opus 5.5 for DevOps, each at xhigh. Setup checks which models your T3 can run.</p></div>
+      <div class="faq-answer"><p>You choose each role’s model and effort, separately, at setup or later. For what you leave open, Jev may advise an implementer’s or reviewer’s model. Otherwise the defaults apply: GPT-6.2-Sol for implementers and Opus 5.5 for reviewers, each at xhigh, and Sonnet 5.5 for DevOps at high. Setup checks which models your T3 can run.</p></div>
     </details>
     <details name="faq" data-reveal style="--i:6">
       <summary>What is Jev, and do I need it?</summary>

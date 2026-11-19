@@ -33,7 +33,7 @@ ROLES = ("implementer", "reviewer", "devops")
 MODELS = {
     "claude-haiku-5-5": {"provider": "claudeAgent", "tier": 1, "roles": ["implementer", "reviewer"]},
     "gpt-6.2-sol": {"provider": "codex", "tier": 2, "roles": ["implementer"]},
-    "claude-sonnet-5-5": {"provider": "claudeAgent", "tier": 2, "roles": ["reviewer"]},
+    "claude-sonnet-5-5": {"provider": "claudeAgent", "tier": 2, "roles": ["reviewer", "devops"]},
     "gpt-6.2-astra": {"provider": "codex", "tier": 3, "roles": ["implementer"]},
     "claude-opus-5-5": {"provider": "claudeAgent", "tier": 3, "roles": ["reviewer", "devops"]},
     # OpenRouter models run through T3's goose provider instance. None of these declares thinking_effort in T3.
@@ -43,8 +43,8 @@ MODELS = {
 }
 RETIRED = {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "deepseek/deepseek-v4.1-flash", "google/gemini-4-argon",
            "qwen/qwen3.8-flash", "moonshotai/kimi-k3.1-pro"}  # Gone from every project's list, even one bound with them.
-DEFAULTS = {"implementer": "gpt-6.2-sol", "implementerEffort": "xhigh", "reviewer": "claude-sonnet-5-5",
-            "reviewerEffort": "xhigh", "devops": "claude-opus-5-5", "devopsEffort": "xhigh"}
+DEFAULTS = {"implementer": "gpt-6.2-sol", "implementerEffort": "xhigh", "reviewer": "claude-opus-5-5",
+            "reviewerEffort": "xhigh", "devops": "claude-sonnet-5-5", "devopsEffort": "high"}
 QUIET_MINUTES = 30
 NUDGES = 1  # Follow-ups asking a worker that ended without its closing command to finish; then the task is blocked.
 OPEN = ("waiting", "ready", "implementing", "review_needed", "reviewing", "approved", "asking", "confirmed",

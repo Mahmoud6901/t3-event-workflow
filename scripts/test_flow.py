@@ -239,7 +239,7 @@ class FlowTests(unittest.TestCase):
         self.t3_caches(codex=None)
         found = self.orchestrator("models")
         self.assertEqual(found["defaults"]["implementer"], {"model": "gpt-6.2-sol", "effort": "xhigh", "runs": False})
-        self.assertEqual(found["defaults"]["reviewer"], {"model": "claude-sonnet-5-5", "effort": "xhigh", "runs": True})
+        self.assertEqual(found["defaults"]["reviewer"], {"model": "claude-opus-5-5", "effort": "xhigh", "runs": True})
         refused = self.orchestrator("init", workspace=str(self.workspace), repo=REPO, requiredChecks=["acceptance"], checks=[],
                                     noChecksReason="Test project")
         self.assertIn("T3 cannot run gpt-6.2-sol, the implementer's default", refused.get("error", ""))
@@ -341,11 +341,11 @@ class FlowTests(unittest.TestCase):
         say = {"authorization": "Use max for the reviewer."}
         reviewer = lambda: self.status()["models"]["reviewer"]  # noqa: E731
         self.assertEqual(self.orchestrator("pick", role="reviewer", effort="max", **say)["effort"], "max")
-        self.assertEqual(reviewer(), {"model": "claude-sonnet-5-5", "modelSource": "default", "effort": "max", "effortSource": "pick"})
-        self.assertTrue(self.orchestrator("pick", role="reviewer", model="claude-opus-5-5", **say)["ok"])
-        self.assertEqual(reviewer(), {"model": "claude-opus-5-5", "modelSource": "pick", "effort": "max", "effortSource": "pick"})
+        self.assertEqual(reviewer(), {"model": "claude-opus-5-5", "modelSource": "default", "effort": "max", "effortSource": "pick"})
+        self.assertTrue(self.orchestrator("pick", role="reviewer", model="claude-sonnet-5-5", **say)["ok"])
+        self.assertEqual(reviewer(), {"model": "claude-sonnet-5-5", "modelSource": "pick", "effort": "max", "effortSource": "pick"})
         self.assertTrue(self.orchestrator("pick", role="reviewer", model="default", **say)["ok"])
-        self.assertEqual(reviewer(), {"model": "claude-sonnet-5-5", "modelSource": "default", "effort": "max", "effortSource": "pick"})
+        self.assertEqual(reviewer(), {"model": "claude-opus-5-5", "modelSource": "default", "effort": "max", "effortSource": "pick"})
         self.assertTrue(self.orchestrator("pick", role="reviewer", effort="default", **say)["ok"])
         self.assertEqual(reviewer()["effortSource"], "default")
         self.assertFalse(self.orchestrator("pick", role="reviewer", **say)["ok"], "a change names a model or an effort")
@@ -381,7 +381,7 @@ class FlowTests(unittest.TestCase):
         self.jev_answer["implementer"], self.jev_answer["implementerEffort"] = "anthropic/claude-sonnet-4", "xhigh"
         self.bind(models={
             "gpt-6.2-sol": {"provider": "codex", "tier": 2, "roles": ["implementer"]},
-            "claude-sonnet-5-5": {"provider": "claudeAgent", "tier": 2, "roles": ["reviewer"]},
+            "claude-sonnet-5-5": {"provider": "claudeAgent", "tier": 2, "roles": ["reviewer", "devops"]},
             "claude-opus-5-5": {"provider": "claudeAgent", "tier": 3, "roles": ["reviewer", "devops"]},
             "anthropic/claude-sonnet-4": {"provider": "acpRegistry_goose", "tier": 2, "roles": ["implementer"],
                                           "thinking": True}})
@@ -521,8 +521,8 @@ class FlowTests(unittest.TestCase):
         (devops,) = self.start()
         arguments = devops["arguments"]
         self.assertEqual((arguments["isolation"], arguments["role"]), ("worktree", "general"))
-        self.assertEqual(arguments["target"], {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5",
-                                               "options": {"effort": "xhigh"}})
+        self.assertEqual(arguments["target"], {"providerInstanceId": "claudeAgent", "model": "claude-sonnet-5-5",
+                                               "options": {"effort": "high"}})
         self.assertIn("worker take", arguments["task"])
         self.assertEqual([t["state"] for t in self.status()["tasks"]], ["confirmed"])
 
