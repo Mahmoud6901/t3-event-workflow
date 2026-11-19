@@ -13,7 +13,8 @@ commands, with your worker id and a token: keep them out of commits, PRs and com
       - If the task's own change is the same, the approval carries to the new head; go on.
       - If the change differs, conflicts, or the PR moved, the task goes back to its implementer.
         End your turn.
-   2. Wait for CI: `gh pr checks <number> --repo <repo> --watch --required`.
+   2. Wait for CI: `gh pr checks <number> --repo <repo> --watch --required`. When `worker update`
+      says CI is off, skip to `worker merge`.
    3. If it passes, run `worker merge` and end your turn.
    4. If a check fails, triage it (below).
 3. **A `triage` job:** CI had already failed on the approved commit. Triage it (below), then carry on

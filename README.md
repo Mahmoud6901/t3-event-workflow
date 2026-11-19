@@ -5,7 +5,9 @@ with the orchestrator and it reports to you. Implementers, reviewers and a DevOp
 background as T3 delegated tasks. Each task becomes a branch and a pull request. A reviewer approves
 the exact commit it read, the orchestrator confirms it, and DevOps merges it through GitHub, where CI
 and branch protection have the last word. You can turn DevOps off at setup or later; then the
-workflow merges confirmed PRs itself, with no model.
+workflow merges confirmed PRs itself, with no model. When GitHub cannot run CI, as when its billing
+stops Actions, you can turn CI off: PRs then merge on their local checks and review, until you turn it
+back on.
 
 Website: [mahmoud6901.github.io/t3-event-workflow](https://mahmoud6901.github.io/t3-event-workflow/)
 ([العربية](https://mahmoud6901.github.io/t3-event-workflow/ar/)).

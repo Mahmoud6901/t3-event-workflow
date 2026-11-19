@@ -154,6 +154,26 @@ class GitHub:
             changed.append(f"protection of {branch}")
         return changed
 
+    def require_checks(self, branch, names, on):
+        """CI off or on: the named CI checks leave or rejoin branch's required checks; the rest stay as they are. A
+        branch that requires no checks is left alone. Returns what it changed."""
+        path = f"repos/{self.repo}/branches/{branch}/protection/required_status_checks"
+        try:
+            rules = self.api("GET", path) or {}
+        except Failed as error:
+            if error.status == 404:
+                return []
+            raise
+        checks = rules.get("checks") or [{"context": c} for c in rules.get("contexts") or []]
+        present = {c["context"] for c in checks}
+        wanted = [c for c in checks if on or c["context"] not in names]
+        wanted += [{"context": n} for n in names if on and n not in present]
+        if {c["context"] for c in wanted} == present:
+            return []
+        self.api("PATCH", path, {"strict": rules.get("strict", True), "checks": [
+            {k: v for k, v in c.items() if k in {"context", "app_id"} and v is not None} for c in wanted]})
+        return [f"required checks of {branch}"]
+
     def approve(self, sha, description):
         """The reviewer's approval: t3/review success on exactly this commit."""
         self.api("POST", f"repos/{self.repo}/statuses/{sha}",

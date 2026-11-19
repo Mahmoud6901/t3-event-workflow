@@ -102,9 +102,14 @@ Get-ChildItem, rg or Select-String, one plain command without pipes or redirecti
 
 ## 4. Protect the branch
 
-Tell the user what `setup_github` changes (see the [protocol](protocol.md)) and run it with their own
-words as `authorization`. Its result lists what it changed; running it again changes nothing. If
-GitHub refuses branch protection, the repo is private on a plan without it: tell the user.
+`setup_github` sets the repo to squash-only merges, branch deletion on merge, update-branch on and
+auto-merge off. It protects the branch with a required PR (0 approvals), the CI checks plus
+`t3/review` on an up-to-date branch, admins included, and no force-push or deletion. It changes only
+what differs.
+
+Tell the user what it changes and run it with their own words as `authorization`. Its result lists
+what it changed; running it again changes nothing. If GitHub refuses branch protection, the repo is
+private on a plan without it: tell the user.
 
 ## 5. Report
 
@@ -116,6 +121,8 @@ Tell the user:
   or go back with "use t3 workflow: back to default for the reviewer"
 - whether DevOps merges, and that "use t3 workflow: turn DevOps off" (or on) changes it for plans that
   start later
+- that when GitHub cannot run CI, as when its billing stops Actions, "use t3 workflow: turn CI off"
+  lets PRs merge on their local checks and review, and "turn CI on" brings CI back
 - that the binding is paused, and work starts once they say to activate it
 - that they choose this thread's model and effort in T3, and can change them at any time. Any Claude
   or Codex model works: T3 keeps the thread's id when it moves between them, and the binding and its

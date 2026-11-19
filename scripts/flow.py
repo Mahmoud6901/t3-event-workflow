@@ -194,6 +194,11 @@ def devops_on(state, name):
     return plan.get("devops", True) if plan["started"] else state.get("devopsOn", True)
 
 
+def ci_checks(config, state):
+    """The CI checks a merge waits for: none while the user has CI off."""
+    return config["github"]["requiredChecks"] if state.get("ciOn", True) else []
+
+
 def update_fix(config, outcome, number):
     """What the implementer is told when its approved PR cannot merge as it was reviewed."""
     return {
@@ -344,7 +349,7 @@ class Flow:
         handler = {"control": self.control, "queue_set": self.queue_set, "next": self.next, "done": self.done,
                    "status": self.status, "answer": self.answer, "ended": self.ended, "restart": self.restart,
                    "queue_edit": self.queue_edit, "setup_github": self.setup_github, "pick": self.pick,
-                   "devops": self.devops}.get(op)
+                   "devops": self.devops, "ci": self.ci}.get(op)
         require(handler, f"Unknown operation {op}")
         return handler(project, req)
 
@@ -429,6 +434,25 @@ class Flow:
                           if plan["started"] and plan["status"] != "done" and plan.get("devops", True) != on)
             return {"devops": on, "keep": keep}
         return self.transact(project, change, "devops")
+
+    def ci(self, project, req):
+        """The user turns GitHub's CI off, as when GitHub billing stops Actions, or back on. Off, a PR merges on its local
+        checks and review, main's protection stops requiring the CI checks, and tasks held for CI go on to merge."""
+        on = req.get("on")
+        require(isinstance(on, bool), "on is true or false")
+        text(req.get("authorization"), "authorization (the user's own words)")
+        config, _ = self.load(project)
+        changed = self.hub_for(config["github"]["repo"]).require_checks(config["branch"], config["github"]["requiredChecks"], on)
+
+        def change(config, state):
+            state["ciOn"] = on
+            freed = [] if on else [t for t in state["tasks"].values() if t["state"] in {"ci_failed", "pipeline_wait"}]
+            for task in freed:
+                for key in ("ciFailed", "pipeline", "waitingOn"):
+                    task.pop(key, None)
+                self.move(task, "confirmed", "CI is off")
+            return {"ci": on, "changed": changed, "freed": [t["id"] for t in freed]}
+        return self.transact(project, change, "ci")
 
     def control(self, project, req):
         action = req.get("action")
@@ -552,8 +576,8 @@ class Flow:
     def setup_github(self, project, req):
         """Squash-only merges and main's protection on the bound repo, on your word. Reports what it changed."""
         text(req.get("authorization"), "authorization (the user's own words)")
-        config, _ = self.load(project)
-        changed = self.hub_for(config["github"]["repo"]).setup(config["branch"], config["github"]["requiredChecks"])
+        config, state = self.load(project)
+        changed = self.hub_for(config["github"]["repo"]).setup(config["branch"], ci_checks(config, state))
         with self.db:
             self.db.execute("INSERT INTO audit(project,operation,version,detail) VALUES (?,?,?,?)",
                             (project, "setup_github", None, store.packed({"changed": changed})))
@@ -576,7 +600,7 @@ class Flow:
                 if task["state"] == "approved":
                     try:
                         pr = gh.pull(task["pr"])
-                        facts[task["id"]] = (task["rev"], pr, gh.checks(pr["head"], config["github"]["requiredChecks"]))
+                        facts[task["id"]] = (task["rev"], pr, gh.checks(pr["head"], ci_checks(config, state)))
                         health.ok(self.path.parent, "github")
                     except github.Failed as error:  # The rule waits for the next wake.
                         health.failed(self.path.parent, "github", error)
@@ -822,7 +846,7 @@ class Flow:
                           for t in state["tasks"].values()],
                 "working": sorted(w["id"] for w in state["workers"].values() if w["state"] == "working"),
                 "models": {role: role_model(config, state, role) for role in ROLES}, "devops": state.get("devopsOn", True),
-                "pendingCalls": len(state["calls"]), "openAsks": [a for a in state["asks"].values() if not a.get("answered")],
+                "ci": state.get("ciOn", True), "pendingCalls": len(state["calls"]), "openAsks": [a for a in state["asks"].values() if not a.get("answered")],
                 "problems": health.problems(self.path.parent, scanning=watcher.running(self.path.parent))}
 
     def unblocked(self, state, task):
@@ -1248,13 +1272,13 @@ class Flow:
             task = state["tasks"][self.held(state, worker)["id"]]
             require(task["rev"] == rev, "The task changed meanwhile; run take")
             if outcome == "current":
-                return {"result": "current", "head": head, "next": wait_steps(config, task)}
+                return {"result": "current", "head": head, "next": wait_steps(config, state, task)}
             if same:
                 task.update(head=head, approvedSha=head)
                 task["rev"] += 1
                 task["history"].append({"at": now(), "from": "merging", "to": "merging",
                                         "note": f"updated with {config['branch']}; approval carried to {head[:12]}"})
-                return {"result": "updated", "head": head, "next": wait_steps(config, task)}
+                return {"result": "updated", "head": head, "next": wait_steps(config, state, task)}
             task["fix"] = update_fix(config, outcome, number)
             task["head"] = head
             task.pop("devops", None)
@@ -1276,9 +1300,9 @@ class Flow:
             require(pr["head"] == task["head"] == task.get("approvedSha"),
                     f"PR #{number} is at {pr['head'][:12]}, but the approved commit is "
                     f"{(task.get('approvedSha') or 'none')[:12]}; run update")
-            names = [*config["github"]["requiredChecks"], github.REVIEW_CONTEXT]
+            names = [*ci_checks(config, state), github.REVIEW_CONTEXT]
             waiting = [f"{name} is {result}" for name, result in gh.checks(pr["head"], names).items() if result != "success"]
-            require(not waiting, f"PR #{number} cannot merge yet: {', '.join(waiting)}. {wait_steps(config, task)}")
+            require(not waiting, f"PR #{number} cannot merge yet: {', '.join(waiting)}. {wait_steps(config, state, task)}")
             sha = gh.merge(number, pr["head"], f"{task['plan']}: {task['task']} (#{number})")
         moved = self.forward(config)
 
@@ -1322,23 +1346,23 @@ class Flow:
             task = self.harness_task(state) if state["control"] == "active" else None
             if not task:
                 return
-            outcome = self.merge_step(config, task)
+            outcome = self.merge_step(config, task, ci_checks(config, state))
             self.transact(project, lambda config, state: self.merge_record(config, state, task["id"], task["rev"], outcome),
                           "harness_merge")
             if outcome["result"] != "merged":
                 return
 
-    def merge_step(self, config, task):
-        """The GitHub side of one step, outside any transaction."""
+    def merge_step(self, config, task, ci):
+        """The GitHub side of one step, outside any transaction; ci names the CI checks it waits for."""
         try:
-            outcome = self.github_step(config, task)
+            outcome = self.github_step(config, task, ci)
         except github.Failed as error:
             health.failed(self.path.parent, "github", error)
             return {"result": "github", "error": str(error)}
         health.ok(self.path.parent, "github")
         return outcome
 
-    def github_step(self, config, task):
+    def github_step(self, config, task, ci):
         gh, number = self.hub_for(config["github"]["repo"]), task["pr"]
         pr = gh.pull(number)
         if pr["merged"]:  # An earlier merge that was not recorded.
@@ -1355,7 +1379,7 @@ class Flow:
             outcome = "carried"
         if outcome != "current":
             return {"result": outcome, "head": head}
-        checks = gh.checks(head, [*config["github"]["requiredChecks"], github.REVIEW_CONTEXT])
+        checks = gh.checks(head, [*ci, github.REVIEW_CONTEXT])
         failed = [name for name, result in checks.items() if result == "failure"]
         if failed:
             return {"result": "ci", "failed": failed}
@@ -1413,7 +1437,7 @@ class Flow:
         if state.get("mergeWoken") == key:
             return {"send": False}
         if task["state"] == "merging":
-            names = [*config["github"]["requiredChecks"], github.REVIEW_CONTEXT]
+            names = [*ci_checks(config, state), github.REVIEW_CONTEXT]
             checks = self.hub_for(config["github"]["repo"]).checks(task["head"], names)
             if any(result in {"pending", "missing"} for result in checks.values()):
                 return {"send": False}
@@ -1434,6 +1458,7 @@ class Flow:
 
         def change(config, state):
             task = self.held(state, worker)
+            require(state.get("ciOn", True), "CI is off for this project, so no merge waits for it: run update, then merge")
             task.pop("devops", None)
             state["workers"][worker["id"]]["job"]["reported"] = True
             if cause == "task":
@@ -1624,7 +1649,9 @@ def devops_brief(config, plan, worker):
     ])
 
 
-def wait_steps(config, task):
+def wait_steps(config, state, task):
+    if not state.get("ciOn", True):
+        return "CI is off for this project, so nothing waits for it: run merge."
     return (f"Wait for CI: gh pr checks {task['pr']} --repo {config['github']['repo']} --watch --required. "
             f"When it passes, run merge. If a check fails, follow devops.md: rerun a flaky one once, else run failed.")
 

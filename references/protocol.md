@@ -3,9 +3,8 @@
 Every workflow call prints one JSON object: `{"ok": true, ...}`, or `{"ok": false, "error": "..."}`
 with a reason you can act on.
 
-- **The orchestrator** runs `t3-workflow '<JSON>'` from its shell. Its hook adds the project and thread
-  and runs [harness.py](../scripts/harness.py).
-- **A worker** runs the commands its brief gives, with its own `--worker` id and `--token`.
+The orchestrator runs `t3-workflow '<JSON>'` from its shell. Its hook adds the project and thread and
+runs [harness.py](../scripts/harness.py).
 
 ## Orchestrator operations
 
@@ -23,6 +22,7 @@ with a reason you can act on.
 | models | `{"op":"models","search":"qwen"}` | `providers`, `defaults` (each with `runs`), `models` (each with `provider`, `efforts`) |
 | pick | `{"op":"pick","role":"reviewer","model":"…","effort":"xhigh","authorization":"<the user's words>"}` | `model`, `effort`, each with its source |
 | devops | `{"op":"devops","on":false,"authorization":"<the user's words>"}` | `devops`, `keep` |
+| ci | `{"op":"ci","on":false,"authorization":"<the user's words>"}` | `ci`, `changed`, `freed` |
 
 - **next** returns:
   - `calls`: each one has `call` (its id), `worker`, `tool` (`delegate_task`, `t3_thread_send` or
@@ -48,16 +48,16 @@ with a reason you can act on.
   in the same role.
 - **control**: `activate`, `pause`, `resume` or `stop`. All but `pause` need the user's own words.
   Workers start only while the binding is active. Running workers finish their current step.
-- **setup_github** sets the repo to squash-only merges, branch deletion on merge, update-branch on and
-  auto-merge off. It protects the branch with a required PR (0 approvals), the CI checks plus
-  `t3/review` on an up-to-date branch, admins included, and no force-push or deletion. It changes
-  only what differs, and needs the user's own words.
+- **setup_github** applies the repo settings and protection in [setup](setup.md#4-protect-the-branch),
+  and needs the user's own words.
 - **pick** sets a role's model (from `models`), its effort, or both; the other stays. An effort is one of
   the model's `efforts`, or low to max alone. `"default"` puts one back (a model, if T3 runs it).
   Running workers keep theirs.
 - **devops** turns DevOps on or off for plans that start later; `keep` lists running plans that stay as
   they are. Off, `next` merges each confirmed PR itself, one at a time, with DevOps's update and merge
   checks; the watcher wakes you when CI finishes. Every CI failure goes to the implementer.
+- **ci** off, as when GitHub billing stops Actions: PRs merge on local checks and review, the branch's
+  protection drops the CI checks, and `freed` tasks go on. On restores both.
 
 The hook also runs `ended` for each "Delegated task …" notice. You never run it yourself.
 
@@ -104,7 +104,7 @@ that way again, its task is `blocked`, and `tell` says so.
 | Reviewer | `worker review --verdict approve\|changes --sha S` | `approve` posts `t3/review` on S, which must still be the PR's head. `changes` sends the task back to its implementer. |
 | DevOps | `worker take` | Gives the oldest confirmed or CI-failed task of its plan, or nothing while another merge runs |
 | DevOps | `worker update` | Brings the PR up to date through GitHub. If the task's own change is unchanged, the approval carries to the new head; otherwise the task goes back to its implementer. |
-| DevOps | `worker merge` | Requires the approved head, every required check and `t3/review` to be green. Then it squash-merges with GitHub's head guard and fast-forwards the project folder when that folder is on the branch. |
+| DevOps | `worker merge` | Squash-merges the approved head once its required checks and `t3/review` are green, then fast-forwards the project folder when it is on the branch. |
 | DevOps | `worker failed --cause task\|pipeline --detail "…"` | `task` sends the failure to the implementer. `pipeline` holds the task until DevOps's own fix merges. |
 | DevOps | `worker pipeline --pr N` | Registers DevOps's pipeline-fix PR as a task, which a reviewer then reads |
 

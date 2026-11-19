@@ -81,6 +81,10 @@ class FakeHub:
         self.setups = getattr(self, "setups", []) + [(branch, list(required))]
         return ["delete_branch_on_merge", f"protection of {branch}"] if len(self.setups) == 1 else []
 
+    def require_checks(self, branch, names, on):
+        self.required = getattr(self, "required", []) + [(branch, list(names), on)]
+        return [f"required checks of {branch}"]
+
     def helper(self):
         """A clone that plays GitHub's side: merging into main and updating PR branches."""
         clone = self.origin.parent / "github-side"
@@ -664,6 +668,70 @@ class FlowTests(unittest.TestCase):
         (devops_call,) = self.start()
         job = self.worker("take", *worker_command(devops_call))
         self.assertEqual((job["job"], job["failed"]), ("triage", ["acceptance"]))
+
+    # CI off: when GitHub cannot run CI (its billing stopped Actions), a PR merges on its local checks and review.
+
+    def test_with_ci_off_a_pr_whose_ci_never_ran_merges_on_its_review(self):
+        _, review, tree = self.to_review()
+        head = git(tree, "rev-parse", "HEAD")
+        self.hub.checks_on[head] = {"acceptance": "failure"}  # The job never started: GitHub billing.
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve", "--sha", head)["ok"])
+        (devops_call,) = self.start()
+        devops = worker_command(devops_call)
+        self.assertFalse(self.orchestrator("ci", on=False)["ok"], "it needs the user's words")
+        off = self.orchestrator("ci", on=False, authorization="Turn CI off: GitHub billing stopped Actions.")
+        self.assertTrue(off["ok"], off)
+        (task,) = self.status()["tasks"]
+        self.assertEqual((off["ci"], off["changed"], off["freed"]), (False, ["required checks of main"], [task["id"]]))
+        self.assertEqual(self.hub.required, [("main", ["acceptance"], False)])
+        self.assertFalse(self.status()["ci"])
+        self.assertEqual(self.worker("take", *devops)["job"], "merge")
+        self.assertIn("CI is off", self.worker("update", *devops)["next"])
+        merged = self.worker("merge", *devops)
+        self.assertTrue(merged["ok"], merged)
+        self.assertEqual(self.hub.merged, [7])
+
+    def test_with_ci_off_a_task_held_for_a_pipeline_fix_merges_and_devops_cannot_hold_another(self):
+        _, devops, _ = self.to_devops()
+        job = self.worker("take", *devops)
+        self.hub.checks_on[job["head"]] = {"acceptance": "failure"}
+        held = self.worker("failed", *devops, "--cause", "pipeline", "--detail", "GitHub billing: the job never started")
+        self.assertEqual(held["state"], "pipeline_wait")
+        off = self.orchestrator("ci", on=False, authorization="Turn CI off.")
+        self.assertEqual(off["freed"], [job["task"]])
+        self.assertEqual(self.worker("take", *devops)["job"], "merge")
+        refused = self.worker("failed", *devops, "--cause", "pipeline", "--detail", "Still red")
+        self.assertIn("CI is off", refused["error"])
+        self.worker("update", *devops)
+        self.assertTrue(self.worker("merge", *devops)["ok"])
+        self.assertEqual(self.hub.merged, [7])
+
+    def test_without_devops_ci_off_merges_once_the_review_is_on_the_head(self):
+        _, review, tree = self.to_review(devops=False)
+        self.assertTrue(self.orchestrator("ci", on=False, authorization="Turn CI off.")["ok"])
+        self.approve(review, tree)
+        self.start()
+        self.start()
+        self.assertEqual(self.hub.merged, [7])
+
+    def test_turning_ci_back_on_requires_the_ci_checks_again(self):
+        _, devops, _ = self.to_devops()
+        self.assertTrue(self.orchestrator("ci", on=False, authorization="Turn CI off.")["ok"])
+        on = self.orchestrator("ci", on=True, authorization="Billing is fixed: turn CI on.")
+        self.assertEqual((on["ci"], on["freed"]), (True, []))
+        self.assertEqual(self.hub.required[-1], ("main", ["acceptance"], True))
+        self.assertTrue(self.status()["ci"])
+        self.worker("take", *devops)
+        self.worker("update", *devops)
+        refused = self.worker("merge", *devops)
+        self.assertIn("acceptance is missing", refused["error"])
+        self.assertEqual(self.hub.merged, [])
+
+    def test_setup_github_leaves_the_ci_checks_out_while_ci_is_off(self):
+        self.bind()
+        self.assertTrue(self.orchestrator("ci", on=False, authorization="Turn CI off.")["ok"])
+        self.assertTrue(self.orchestrator("setup_github", authorization="Set up GitHub.")["ok"])
+        self.assertEqual(self.hub.setups, [("main", [])])
 
     # DevOps off: the harness merges, and the watcher wakes the orchestrator when there is a step to take.
 

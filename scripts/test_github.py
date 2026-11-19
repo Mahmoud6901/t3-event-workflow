@@ -236,5 +236,37 @@ class SetupTests(unittest.TestCase):
         self.assertEqual([c for c in fake.calls if c[0] != "GET"], [])
 
 
+CHECKS_PATH = f"repos/{REPO}/branches/main/protection/required_status_checks"
+
+
+class RequiredChecksTests(unittest.TestCase):
+    """CI off and on: only the binding's CI checks leave or rejoin main's required checks."""
+
+    def test_ci_off_takes_only_the_ci_checks_off_mains_required_checks(self):
+        fake = FakeGh()
+        fake.on("GET", CHECKS_PATH, {"strict": True, "contexts": ["t3/review", "acceptance", "lint"], "checks": [
+            {"context": "t3/review", "app_id": None}, {"context": "acceptance", "app_id": 15368}, {"context": "lint", "app_id": 15368}]})
+        fake.on("PATCH", CHECKS_PATH, {})
+        self.assertEqual(hub(fake).require_checks("main", ["acceptance"], on=False), ["required checks of main"])
+        self.assertEqual(fake.calls[-1], ("PATCH", CHECKS_PATH, {"strict": True, "checks": [
+            {"context": "t3/review"}, {"context": "lint", "app_id": 15368}]}))
+
+    def test_ci_on_puts_the_ci_checks_back_beside_the_rest(self):
+        fake = FakeGh()
+        fake.on("GET", CHECKS_PATH, {"strict": True, "contexts": ["t3/review"], "checks": [{"context": "t3/review", "app_id": None}]})
+        fake.on("PATCH", CHECKS_PATH, {})
+        self.assertEqual(hub(fake).require_checks("main", ["acceptance"], on=True), ["required checks of main"])
+        self.assertEqual(fake.calls[-1], ("PATCH", CHECKS_PATH, {"strict": True, "checks": [
+            {"context": "t3/review"}, {"context": "acceptance"}]}))
+
+    def test_a_branch_that_requires_no_checks_or_already_matches_is_left_alone(self):
+        fake = FakeGh()
+        fake.on("GET", CHECKS_PATH, (404, {"message": "Required status checks not enabled"}))
+        self.assertEqual(hub(fake).require_checks("main", ["acceptance"], on=False), [])
+        fake.on("GET", CHECKS_PATH, {"strict": True, "contexts": ["t3/review"], "checks": [{"context": "t3/review", "app_id": None}]})
+        self.assertEqual(hub(fake).require_checks("main", ["acceptance"], on=False), [])
+        self.assertEqual([c for c in fake.calls if c[0] != "GET"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
