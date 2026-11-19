@@ -34,6 +34,7 @@ MODELS = {
     "claude-haiku-5-5": {"provider": "claudeAgent", "tier": 1, "roles": ["implementer", "reviewer"]},
     "gpt-6-luna": {"provider": "codex", "tier": 1, "roles": ["implementer", "reviewer"]},
     "gpt-6.1-sol": {"provider": "codex", "tier": 2, "roles": ["implementer"]},
+    "gpt-6.2-sol": {"provider": "codex", "tier": 2, "roles": ["implementer"]},
     "claude-sonnet-5-5": {"provider": "claudeAgent", "tier": 2, "roles": ["reviewer"]},
     "gpt-6-astra": {"provider": "codex", "tier": 3, "roles": ["implementer"]},
     "claude-opus-5-5": {"provider": "claudeAgent", "tier": 3, "roles": ["reviewer", "devops"]},
@@ -44,7 +45,7 @@ MODELS = {
     "moonshotai/kimi-k3.1-pro": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
     "google/gemini-4-neon": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer"]},  # From 2026-11-18.
 }
-DEFAULTS = {"implementer": "gpt-6.1-sol", "implementerEffort": "xhigh", "reviewer": "claude-sonnet-5-5",
+DEFAULTS = {"implementer": "gpt-6.2-sol", "implementerEffort": "xhigh", "reviewer": "claude-sonnet-5-5",
             "reviewerEffort": "xhigh", "devops": "claude-opus-5-5", "devopsEffort": "xhigh"}
 QUIET_MINUTES = 30
 NUDGES = 1  # Follow-ups asking a worker that ended without its closing command to finish; then the task is blocked.

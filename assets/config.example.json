@@ -21,10 +21,10 @@
     }
   ],
   "defaults": {
-    "implementer": "gpt-6.1-sol",
-    "implementerEffort": "high",
+    "implementer": "gpt-6.2-sol",
+    "implementerEffort": "xhigh",
     "reviewer": "claude-sonnet-5-5",
-    "reviewerEffort": "high",
+    "reviewerEffort": "xhigh",
     "devops": "claude-opus-5-5",
     "devopsEffort": "xhigh"
   },
@@ -46,6 +46,13 @@
       ]
     },
     "gpt-6.1-sol": {
+      "provider": "codex",
+      "tier": 2,
+      "roles": [
+        "implementer"
+      ]
+    },
+    "gpt-6.2-sol": {
       "provider": "codex",
       "tier": 2,
       "roles": [

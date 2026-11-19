@@ -33,7 +33,7 @@ CLAUDE_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [{"id": "effort
                for s in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")]
 CODEX_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [
     {"id": "reasoningEffort", "options": levels("low", "medium", "high", "xhigh", "max", "ultra")}]}}
-              for s in ("gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra")]
+              for s in ("gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra")]
 
 ORCH = "thread-orch"
 PROJECT = "proj-1"
@@ -238,12 +238,11 @@ class FlowTests(unittest.TestCase):
     def test_without_codex_setup_needs_a_pick_for_the_implementer_and_it_runs_on_claude(self):
         self.t3_caches(codex=None)
         found = self.orchestrator("models")
-        self.assertEqual(found["defaults"]["implementer"], {"model": "gpt-6.1-sol", "effort": "xhigh", "runs": False})
-        self.assertEqual(found["defaults"]["reviewer"]["effort"], "xhigh")
-        self.assertTrue(found["defaults"]["reviewer"]["runs"])
+        self.assertEqual(found["defaults"]["implementer"], {"model": "gpt-6.2-sol", "effort": "xhigh", "runs": False})
+        self.assertEqual(found["defaults"]["reviewer"], {"model": "claude-sonnet-5-5", "effort": "xhigh", "runs": True})
         refused = self.orchestrator("init", workspace=str(self.workspace), repo=REPO, requiredChecks=["acceptance"], checks=[],
                                     noChecksReason="Test project")
-        self.assertIn("T3 cannot run gpt-6.1-sol, the implementer's default", refused.get("error", ""))
+        self.assertIn("T3 cannot run gpt-6.2-sol, the implementer's default", refused.get("error", ""))
         self.bind(picks={"implementer": "claude-sonnet-5-5"})
         self.assertFalse(self.orchestrator("pick", role="implementer", model="default", authorization="Back to default.")["ok"],
                          "a default T3 could not run stays out of reach")
@@ -321,7 +320,7 @@ class FlowTests(unittest.TestCase):
                          {"model": "qwen/qwen3.8-flash", "modelSource": "pick", "effort": "xhigh", "effortSource": "default"})
         self.assertTrue(self.orchestrator("pick", role="implementer", model=None, authorization="Back to the default.")["ok"])
         self.assertEqual(self.orchestrator("status")["models"]["implementer"],
-                         {"model": "gpt-6.1-sol", "modelSource": "default", "effort": "xhigh", "effortSource": "default"})
+                         {"model": "gpt-6.2-sol", "modelSource": "default", "effort": "xhigh", "effortSource": "default"})
 
     def test_the_user_sets_a_roles_model_and_effort_apart_and_puts_each_back(self):
         self.t3_caches()
@@ -368,7 +367,7 @@ class FlowTests(unittest.TestCase):
         # Its choices are off, low, medium, high and max: there is no xhigh.
         self.jev_answer["implementer"], self.jev_answer["implementerEffort"] = "anthropic/claude-sonnet-4", "xhigh"
         self.bind(models={
-            "gpt-6.1-sol": {"provider": "codex", "tier": 2, "roles": ["implementer"]},
+            "gpt-6.2-sol": {"provider": "codex", "tier": 2, "roles": ["implementer"]},
             "claude-sonnet-5-5": {"provider": "claudeAgent", "tier": 2, "roles": ["reviewer"]},
             "claude-opus-5-5": {"provider": "claudeAgent", "tier": 3, "roles": ["reviewer", "devops"]},
             "anthropic/claude-sonnet-4": {"provider": "acpRegistry_goose", "tier": 2, "roles": ["implementer"],
