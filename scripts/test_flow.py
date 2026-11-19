@@ -59,6 +59,7 @@ class FakeHub:
         self.checks_on = {}  # sha -> {name: state}
         self.posted = []
         self.merged = []
+        self.protection = [{"context": "t3/review"}, {"context": "acceptance", "app_id": 15368}]  # main's required checks
 
     def open(self, number, branch, files):
         head = git(self.origin, "rev-parse", f"refs/heads/{branch}")
@@ -81,9 +82,15 @@ class FakeHub:
         self.setups = getattr(self, "setups", []) + [(branch, list(required))]
         return ["delete_branch_on_merge", f"protection of {branch}"] if len(self.setups) == 1 else []
 
-    def require_checks(self, branch, names, on):
-        self.required = getattr(self, "required", []) + [(branch, list(names), on)]
-        return [f"required checks of {branch}"]
+    def drop_ci_checks(self, branch):
+        removed = [c for c in self.protection if c["context"] != "t3/review"]
+        self.protection = [c for c in self.protection if c["context"] == "t3/review"]
+        return ([f"required checks of {branch}"] if removed else []), removed
+
+    def restore_ci_checks(self, branch, checks):
+        back = [c for c in checks if c["context"] not in {p["context"] for p in self.protection}]
+        self.protection = self.protection + back
+        return [f"required checks of {branch}"] if back else []
 
     def helper(self):
         """A clone that plays GitHub's side: merging into main and updating PR branches."""
@@ -683,7 +690,7 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(off["ok"], off)
         (task,) = self.status()["tasks"]
         self.assertEqual((off["ci"], off["changed"], off["freed"]), (False, ["required checks of main"], [task["id"]]))
-        self.assertEqual(self.hub.required, [("main", ["acceptance"], False)])
+        self.assertEqual(self.hub.protection, [{"context": "t3/review"}])
         self.assertFalse(self.status()["ci"])
         self.assertEqual(self.worker("take", *devops)["job"], "merge")
         self.assertIn("CI is off", self.worker("update", *devops)["next"])
@@ -719,13 +726,25 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(self.orchestrator("ci", on=False, authorization="Turn CI off.")["ok"])
         on = self.orchestrator("ci", on=True, authorization="Billing is fixed: turn CI on.")
         self.assertEqual((on["ci"], on["freed"]), (True, []))
-        self.assertEqual(self.hub.required[-1], ("main", ["acceptance"], True))
+        self.assertEqual(self.hub.protection, [{"context": "t3/review"}, {"context": "acceptance", "app_id": 15368}])
         self.assertTrue(self.status()["ci"])
         self.worker("take", *devops)
         self.worker("update", *devops)
         refused = self.worker("merge", *devops)
         self.assertIn("acceptance is missing", refused["error"])
         self.assertEqual(self.hub.merged, [])
+
+    def test_ci_off_drops_a_required_check_the_binding_does_not_name_and_on_brings_back_all_of_them(self):
+        self.bind()
+        # As 0.6.0 left one project: its CI off took only acceptance off main, and postgres-stores still blocked merges.
+        self.hub.protection = [{"context": "t3/review"}, {"context": "postgres-stores", "app_id": 15368}]
+        self.assertEqual(self.orchestrator("ci", on=False, authorization="Turn CI off.")["changed"], ["required checks of main"])
+        self.assertEqual(self.hub.protection, [{"context": "t3/review"}])
+        self.assertEqual(self.orchestrator("ci", on=False, authorization="Turn CI off again.")["changed"], [])
+        on = self.orchestrator("ci", on=True, authorization="Turn CI on.")
+        self.assertEqual(on["changed"], ["required checks of main"])
+        self.assertEqual(self.hub.protection, [{"context": "t3/review"}, {"context": "postgres-stores", "app_id": 15368},
+                                               {"context": "acceptance"}])
 
     def test_setup_github_leaves_the_ci_checks_out_while_ci_is_off(self):
         self.bind()

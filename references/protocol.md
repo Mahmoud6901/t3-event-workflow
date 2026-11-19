@@ -56,8 +56,8 @@ runs [harness.py](../scripts/harness.py).
 - **devops** turns DevOps on or off for plans that start later; `keep` lists running plans that stay as
   they are. Off, `next` merges each confirmed PR itself, one at a time, with DevOps's update and merge
   checks; the watcher wakes you when CI finishes. Every CI failure goes to the implementer.
-- **ci** off, as when GitHub billing stops Actions: PRs merge on local checks and review, the branch's
-  protection drops the CI checks, and `freed` tasks go on. On restores both.
+- **ci** off, as when GitHub billing stops Actions: PRs merge on local checks and review, the branch
+  requires only `t3/review`, and `freed` tasks go on. On puts back what it removed.
 
 The hook also runs `ended` for each "Delegated task …" notice. You never run it yourself.
 

@@ -441,11 +441,23 @@ class Flow:
         on = req.get("on")
         require(isinstance(on, bool), "on is true or false")
         text(req.get("authorization"), "authorization (the user's own words)")
-        config, _ = self.load(project)
-        changed = self.hub_for(config["github"]["repo"]).require_checks(config["branch"], config["github"]["requiredChecks"], on)
+        config, state = self.load(project)
+        gh = self.hub_for(config["github"]["repo"])
+        removed = []
+        if on:  # What CI off removed, as it was, and the binding's own checks, which an older CI off may have taken.
+            back = list(state.get("ciRemoved") or [])
+            back += [{"context": n} for n in config["github"]["requiredChecks"] if n not in {c["context"] for c in back}]
+            changed = gh.restore_ci_checks(config["branch"], back)
+        else:
+            changed, removed = gh.drop_ci_checks(config["branch"])
 
         def change(config, state):
             state["ciOn"] = on
+            if on:
+                state.pop("ciRemoved", None)
+            else:
+                saved = state.get("ciRemoved") or []
+                state["ciRemoved"] = saved + [c for c in removed if c["context"] not in {s["context"] for s in saved}]
             freed = [] if on else [t for t in state["tasks"].values() if t["state"] in {"ci_failed", "pipeline_wait"}]
             for task in freed:
                 for key in ("ciFailed", "pipeline", "waitingOn"):

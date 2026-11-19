@@ -240,31 +240,36 @@ CHECKS_PATH = f"repos/{REPO}/branches/main/protection/required_status_checks"
 
 
 class RequiredChecksTests(unittest.TestCase):
-    """CI off and on: only the binding's CI checks leave or rejoin main's required checks."""
+    """CI off and on: every required check but t3/review leaves main's required checks, and comes back as it was."""
 
-    def test_ci_off_takes_only_the_ci_checks_off_mains_required_checks(self):
+    def test_ci_off_drops_every_required_check_but_the_review_and_returns_them_as_they_were(self):
         fake = FakeGh()
-        fake.on("GET", CHECKS_PATH, {"strict": True, "contexts": ["t3/review", "acceptance", "lint"], "checks": [
-            {"context": "t3/review", "app_id": None}, {"context": "acceptance", "app_id": 15368}, {"context": "lint", "app_id": 15368}]})
+        fake.on("GET", CHECKS_PATH, {"strict": True, "contexts": ["t3/review", "acceptance", "postgres-stores"], "checks": [
+            {"context": "t3/review", "app_id": None}, {"context": "acceptance", "app_id": 15368},
+            {"context": "postgres-stores", "app_id": 15368}]})
         fake.on("PATCH", CHECKS_PATH, {})
-        self.assertEqual(hub(fake).require_checks("main", ["acceptance"], on=False), ["required checks of main"])
-        self.assertEqual(fake.calls[-1], ("PATCH", CHECKS_PATH, {"strict": True, "checks": [
-            {"context": "t3/review"}, {"context": "lint", "app_id": 15368}]}))
+        changed, removed = hub(fake).drop_ci_checks("main")
+        self.assertEqual(changed, ["required checks of main"])
+        self.assertEqual(removed, [{"context": "acceptance", "app_id": 15368}, {"context": "postgres-stores", "app_id": 15368}])
+        self.assertEqual(fake.calls[-1], ("PATCH", CHECKS_PATH, {"strict": True, "checks": [{"context": "t3/review"}]}))
 
-    def test_ci_on_puts_the_ci_checks_back_beside_the_rest(self):
+    def test_ci_on_puts_the_checks_back_with_their_apps_beside_the_rest(self):
         fake = FakeGh()
         fake.on("GET", CHECKS_PATH, {"strict": True, "contexts": ["t3/review"], "checks": [{"context": "t3/review", "app_id": None}]})
         fake.on("PATCH", CHECKS_PATH, {})
-        self.assertEqual(hub(fake).require_checks("main", ["acceptance"], on=True), ["required checks of main"])
+        back = [{"context": "postgres-stores", "app_id": 15368}, {"context": "acceptance"}, {"context": "t3/review"}]
+        self.assertEqual(hub(fake).restore_ci_checks("main", back), ["required checks of main"])
         self.assertEqual(fake.calls[-1], ("PATCH", CHECKS_PATH, {"strict": True, "checks": [
-            {"context": "t3/review"}, {"context": "acceptance"}]}))
+            {"context": "t3/review"}, {"context": "postgres-stores", "app_id": 15368}, {"context": "acceptance"}]}))
 
     def test_a_branch_that_requires_no_checks_or_already_matches_is_left_alone(self):
         fake = FakeGh()
         fake.on("GET", CHECKS_PATH, (404, {"message": "Required status checks not enabled"}))
-        self.assertEqual(hub(fake).require_checks("main", ["acceptance"], on=False), [])
+        self.assertEqual(hub(fake).drop_ci_checks("main"), ([], []))
+        self.assertEqual(hub(fake).restore_ci_checks("main", [{"context": "acceptance"}]), [])
         fake.on("GET", CHECKS_PATH, {"strict": True, "contexts": ["t3/review"], "checks": [{"context": "t3/review", "app_id": None}]})
-        self.assertEqual(hub(fake).require_checks("main", ["acceptance"], on=False), [])
+        self.assertEqual(hub(fake).drop_ci_checks("main"), ([], []))
+        self.assertEqual(hub(fake).restore_ci_checks("main", [{"context": "t3/review"}]), [])
         self.assertEqual([c for c in fake.calls if c[0] != "GET"], [])
 
 

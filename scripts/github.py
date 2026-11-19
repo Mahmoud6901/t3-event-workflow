@@ -154,25 +154,42 @@ class GitHub:
             changed.append(f"protection of {branch}")
         return changed
 
-    def require_checks(self, branch, names, on):
-        """CI off or on: the named CI checks leave or rejoin branch's required checks; the rest stay as they are. A
-        branch that requires no checks is left alone. Returns what it changed."""
-        path = f"repos/{self.repo}/branches/{branch}/protection/required_status_checks"
+    def required_checks(self, branch):
+        """branch's required-checks rules, each check as {context, app_id}; None when it requires no checks."""
         try:
-            rules = self.api("GET", path) or {}
+            rules = self.api("GET", f"repos/{self.repo}/branches/{branch}/protection/required_status_checks") or {}
         except Failed as error:
             if error.status == 404:
-                return []
+                return None
             raise
         checks = rules.get("checks") or [{"context": c} for c in rules.get("contexts") or []]
-        present = {c["context"] for c in checks}
-        wanted = [c for c in checks if on or c["context"] not in names]
-        wanted += [{"context": n} for n in names if on and n not in present]
-        if {c["context"] for c in wanted} == present:
-            return []
-        self.api("PATCH", path, {"strict": rules.get("strict", True), "checks": [
-            {k: v for k, v in c.items() if k in {"context", "app_id"} and v is not None} for c in wanted]})
+        return {"strict": rules.get("strict", True),
+                "checks": [{k: v for k, v in c.items() if k in {"context", "app_id"} and v is not None} for c in checks]}
+
+    def set_required_checks(self, branch, rules, checks):
+        self.api("PATCH", f"repos/{self.repo}/branches/{branch}/protection/required_status_checks",
+                 {"strict": rules["strict"], "checks": checks})
         return [f"required checks of {branch}"]
+
+    def drop_ci_checks(self, branch):
+        """CI off: every required check but t3/review leaves branch's required checks, since GitHub runs none of them.
+        Returns (what it changed, the checks it removed as they were, to restore). A branch that requires no checks
+        is left alone."""
+        rules = self.required_checks(branch)
+        removed = [c for c in (rules or {}).get("checks", []) if c["context"] != REVIEW_CONTEXT]
+        if not removed:
+            return [], []
+        kept = [c for c in rules["checks"] if c["context"] == REVIEW_CONTEXT]
+        return self.set_required_checks(branch, rules, kept), removed
+
+    def restore_ci_checks(self, branch, checks):
+        """CI on: the checks CI off removed, and the binding's own, rejoin branch's required checks beside the rest."""
+        rules = self.required_checks(branch)
+        if rules is None:
+            return []
+        present = {c["context"] for c in rules["checks"]}
+        back = [c for c in checks if c["context"] not in present]
+        return self.set_required_checks(branch, rules, rules["checks"] + back) if back else []
 
     def approve(self, sha, description):
         """The reviewer's approval: t3/review success on exactly this commit."""
