@@ -33,7 +33,7 @@ CLAUDE_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [{"id": "effort
                for s in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")]
 CODEX_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [
     {"id": "reasoningEffort", "options": levels("low", "medium", "high", "xhigh", "max", "ultra")}]}}
-              for s in ("gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra")]
+              for s in ("gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra")]
 
 ORCH = "thread-orch"
 PROJECT = "proj-1"
@@ -157,7 +157,7 @@ class FlowTests(unittest.TestCase):
         git(self.workspace, "push", "origin", "main")
         self.db = root / "state" / "harness.sqlite3"
         self.hub = FakeHub(self.origin)
-        self.jev_answer = {"implementer": "gpt-6.1-sol", "implementerEffort": "medium",
+        self.jev_answer = {"implementer": "gpt-6.2-astra", "implementerEffort": "medium",
                            "reviewer": "claude-sonnet-5-5", "reviewerEffort": "high"}
         self.caches = root / "t3-caches"  # T3's model lists; missing until a test writes them, so nothing is checked.
         patcher = patch.object(flow, "T3_CACHES", self.caches)
@@ -192,7 +192,7 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(call["tool"], "delegate_task")
         arguments = call["arguments"]
         self.assertEqual((arguments["isolation"], arguments["role"], arguments["mode"]), ("worktree", "implementation", "async"))
-        self.assertEqual(arguments["target"], {"providerInstanceId": "codex", "model": "gpt-6.1-sol",
+        self.assertEqual(arguments["target"], {"providerInstanceId": "codex", "model": "gpt-6.2-astra",
                                                "options": {"reasoningEffort": "medium", "serviceTier": "default"}})
         self.assertEqual(arguments["clientRequestId"], call["call"])
         self.assertIn("Rename nmae to name in src/login.ts.", arguments["task"])
@@ -274,6 +274,19 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose", "model": "google/gemini-4-neon",
                                                        "options": {"provider": "openrouter"}})
 
+    def test_a_retired_model_leaves_a_bound_projects_list_and_its_retired_default_moves_to_the_current_one(self):
+        retired = ("gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra")
+        bound_before = {**flow.MODELS, **{m: {"provider": "codex", "tier": tier, "roles": ["implementer"]}
+                                          for tier, m in enumerate(retired, 1)}}
+        self.bind(models=bound_before, defaults={"implementer": "gpt-6.1-sol"})
+        self.assertEqual(self.status()["models"]["implementer"]["model"], "gpt-6.2-sol")
+        self.jev_answer = {}  # No advice, so the default stands.
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-sol")
+        self.assertIn("gpt-6.2-astra", self.jev_models)
+        self.assertFalse(set(retired) & set(self.jev_models), self.jev_models)
+
     def test_a_role_picked_at_setup_runs_on_that_model_whatever_jev_advises(self):
         self.t3_caches()
         self.bind(picks={"implementer": {"model": "anthropic/claude-sonnet-4", "effort": "medium"},
@@ -291,11 +304,11 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(getattr(self, "jev_asked", 0), 0)
 
     def test_an_effort_set_alone_wins_over_jevs_and_jev_still_picks_the_model(self):
-        self.jev_answer["implementer"] = "gpt-6-luna"
+        self.jev_answer["implementer"] = "gpt-6.2-sol"
         self.bind(picks={"implementer": {"effort": "max"}})
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         (call,) = self.orchestrator("next")["calls"]
-        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "codex", "model": "gpt-6-luna",
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "codex", "model": "gpt-6.2-sol",
                                                        "options": {"reasoningEffort": "max", "serviceTier": "default"}})
 
     def test_a_pick_t3_does_not_list_is_refused_and_nothing_is_bound(self):
@@ -315,7 +328,7 @@ class FlowTests(unittest.TestCase):
         changed = self.orchestrator("pick", role="implementer", model="qwen/qwen3.8-flash", authorization="Use qwen for the implementer.")
         self.assertTrue(changed["ok"], changed)
         (call,) = self.orchestrator("next")["calls"]
-        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.1-sol", "the started implementer keeps Jev's model")
+        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra", "the started implementer keeps Jev's model")
         self.assertEqual(self.orchestrator("status")["models"]["implementer"],
                          {"model": "qwen/qwen3.8-flash", "modelSource": "pick", "effort": "xhigh", "effortSource": "default"})
         self.assertTrue(self.orchestrator("pick", role="implementer", model=None, authorization="Back to the default.")["ok"])
@@ -354,14 +367,14 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.status()["models"]["implementer"]["effort"], "ultra", "a refused change changes nothing")
 
     def test_an_openrouter_worker_gets_only_the_options_its_model_declares(self):
-        # T3's goose list (2026-11-16): the four approved OpenRouter models declare `provider` and `mode`, not
+        # T3's goose list (2026-11-16): the approved OpenRouter models declare `provider` and `mode`, not
         # `thinking_effort`, so the effort has no option to go in.
-        self.jev_answer["implementer"], self.jev_answer["implementerEffort"] = "qwen/qwen3.8-flash", "xhigh"
+        self.jev_answer["implementer"], self.jev_answer["implementerEffort"] = "z-ai/glm-5.3-prime", "xhigh"
         self.bind()
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         (call,) = self.orchestrator("next")["calls"]
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose",
-                                                       "model": "qwen/qwen3.8-flash", "options": {"provider": "openrouter"}})
+                                                       "model": "z-ai/glm-5.3-prime", "options": {"provider": "openrouter"}})
 
     def test_an_openrouter_model_that_declares_thinking_gets_the_effort_in_its_own_terms(self):
         # Its choices are off, low, medium, high and max: there is no xhigh.

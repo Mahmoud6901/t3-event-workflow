@@ -1,4 +1,5 @@
 """Jev's advice for one task of the delegated PR workflow: the implementer's and reviewer's model and effort."""
+import json
 import unittest
 from unittest.mock import patch
 
@@ -23,13 +24,22 @@ class TaskAdviceTests(unittest.TestCase):
         self.assertNotIn("claude-opus-5-5", payload["questions"]["implementer"]["criteria"])
         self.assertIn("claude-opus-5-5", payload["questions"]["reviewer"]["criteria"])
 
+    def test_jev_weighs_how_strong_each_model_is_and_not_what_it_costs(self):
+        questions = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task")["questions"]
+        self.assertIn("strongest", questions["implementer"]["criteria"]["gpt-6.2-astra"])
+        self.assertIn("right the first time", questions["implementer"]["instructions"])
+        self.assertIn("right the first time", questions["implementerEffort"]["instructions"])
+        asked = json.dumps(questions).lower()
+        self.assertNotIn("tier", asked)
+        self.assertNotIn("cheap", asked)
+
     def test_valid_choices_are_kept_and_an_invalid_one_is_left_to_the_defaults(self):
         payload = jev.build_request(CONFIG, {}, "task")
-        answer = envelope(payload, {"implementer": "gpt-6-astra", "implementerEffort": "xhigh",
+        answer = envelope(payload, {"implementer": "gpt-6.2-astra", "implementerEffort": "xhigh",
                                     "reviewer": "claude-opus-5-5", "reviewerEffort": "extreme"})
         with patch.object(jev, "_fetch", return_value=(answer, None)):
             choice = flow.default_jev(CONFIG, {"request": "Fix the login typo"})
-        self.assertEqual(choice, {"implementer": "gpt-6-astra", "reviewer": "claude-opus-5-5", "implementerEffort": "xhigh"})
+        self.assertEqual(choice, {"implementer": "gpt-6.2-astra", "reviewer": "claude-opus-5-5", "implementerEffort": "xhigh"})
 
     def test_an_unreachable_service_is_reported_so_the_defaults_stand_with_a_health_problem(self):
         with patch.object(jev, "_fetch", return_value=(None, "connection_error")):

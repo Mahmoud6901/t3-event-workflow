@@ -32,19 +32,17 @@ EFFORTS = ("low", "medium", "high", "xhigh", "max")
 ROLES = ("implementer", "reviewer", "devops")
 MODELS = {
     "claude-haiku-5-5": {"provider": "claudeAgent", "tier": 1, "roles": ["implementer", "reviewer"]},
-    "gpt-6-luna": {"provider": "codex", "tier": 1, "roles": ["implementer", "reviewer"]},
-    "gpt-6.1-sol": {"provider": "codex", "tier": 2, "roles": ["implementer"]},
     "gpt-6.2-sol": {"provider": "codex", "tier": 2, "roles": ["implementer"]},
     "claude-sonnet-5-5": {"provider": "claudeAgent", "tier": 2, "roles": ["reviewer"]},
-    "gpt-6-astra": {"provider": "codex", "tier": 3, "roles": ["implementer"]},
+    "gpt-6.2-astra": {"provider": "codex", "tier": 3, "roles": ["implementer"]},
     "claude-opus-5-5": {"provider": "claudeAgent", "tier": 3, "roles": ["reviewer", "devops"]},
     # OpenRouter models run through T3's goose provider instance. None of these declares thinking_effort in T3.
-    "deepseek/deepseek-v4.1-flash": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
-    "google/gemini-4-argon": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
-    "qwen/qwen3.8-flash": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
-    "moonshotai/kimi-k3.1-pro": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
-    "google/gemini-4-neon": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer"]},  # From 2026-11-18.
+    "deepseek/deepseek-v4.1-flash-1017": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
+    "z-ai/glm-5.3-prime": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer"]},
+    "google/gemini-4-neon": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer"]},
 }
+RETIRED = {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "deepseek/deepseek-v4.1-flash", "google/gemini-4-argon",
+           "qwen/qwen3.8-flash", "moonshotai/kimi-k3.1-pro"}  # Gone from every project's list, even one bound with them.
 DEFAULTS = {"implementer": "gpt-6.2-sol", "implementerEffort": "xhigh", "reviewer": "claude-sonnet-5-5",
             "reviewerEffort": "xhigh", "devops": "claude-opus-5-5", "devopsEffort": "xhigh"}
 QUIET_MINUTES = 30
@@ -319,8 +317,10 @@ class Flow:
         row = self.db.execute("SELECT config, state FROM projects WHERE id=?", (project,)).fetchone()
         require(row, f"Project {project} has no binding")
         config = json.loads(row[0])
-        # A model approved after the project was bound joins its list; Jev weighs only the ones T3 runs at the time.
-        config["models"] = {**MODELS, **(config.get("models") or {})}
+        # A model approved after the project was bound joins its list and a retired one leaves it, its default giving
+        # way to the current one. Jev weighs only the models T3 runs at the time.
+        config["models"] = {m: item for m, item in {**MODELS, **(config.get("models") or {})}.items() if m not in RETIRED}
+        config["defaults"] = {key: DEFAULTS[key] if value in RETIRED else value for key, value in config["defaults"].items()}
         return config, json.loads(row[1])
 
     def transact(self, project, change, op):

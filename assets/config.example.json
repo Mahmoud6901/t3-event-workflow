@@ -37,21 +37,6 @@
         "reviewer"
       ]
     },
-    "gpt-6-luna": {
-      "provider": "codex",
-      "tier": 1,
-      "roles": [
-        "implementer",
-        "reviewer"
-      ]
-    },
-    "gpt-6.1-sol": {
-      "provider": "codex",
-      "tier": 2,
-      "roles": [
-        "implementer"
-      ]
-    },
     "gpt-6.2-sol": {
       "provider": "codex",
       "tier": 2,
@@ -66,7 +51,7 @@
         "reviewer"
       ]
     },
-    "gpt-6-astra": {
+    "gpt-6.2-astra": {
       "provider": "codex",
       "tier": 3,
       "roles": [
@@ -81,7 +66,7 @@
         "devops"
       ]
     },
-    "deepseek/deepseek-v4.1-flash": {
+    "deepseek/deepseek-v4.1-flash-1017": {
       "provider": "acpRegistry_goose",
       "tier": 1,
       "roles": [
@@ -89,25 +74,9 @@
         "reviewer"
       ]
     },
-    "google/gemini-4-argon": {
+    "z-ai/glm-5.3-prime": {
       "provider": "acpRegistry_goose",
-      "tier": 1,
-      "roles": [
-        "implementer",
-        "reviewer"
-      ]
-    },
-    "qwen/qwen3.8-flash": {
-      "provider": "acpRegistry_goose",
-      "tier": 1,
-      "roles": [
-        "implementer",
-        "reviewer"
-      ]
-    },
-    "moonshotai/kimi-k3.1-pro": {
-      "provider": "acpRegistry_goose",
-      "tier": 1,
+      "tier": 2,
       "roles": [
         "implementer",
         "reviewer"

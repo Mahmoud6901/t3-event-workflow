@@ -23,8 +23,9 @@ MAX_RESPONSE_BYTES = 256_000
 TIMEOUT_SECONDS = 20
 ROLES = ("implementer", "reviewer")
 PROVIDER_LABELS = {"codex": "OpenAI via Codex", "claudeAgent": "Anthropic via Claude", "acpRegistry_goose": "OpenRouter via goose"}
-EFFORT_OPTIONS = {"low": "Quick and cheap.", "medium": "Balanced.", "high": "Thorough.",
-                  "xhigh": "Very thorough.", "max": "Most thorough and most expensive."}
+EFFORT_OPTIONS = {"low": "Quick.", "medium": "Balanced.", "high": "Thorough.",
+                  "xhigh": "Very thorough.", "max": "Most thorough and slowest."}
+STRENGTH = {1: "light, for small well-specified changes", 2: "strong and quick", 3: "strongest"}  # By the model's tier.
 USE_WINDOWS_CURL = os.name == "nt"
 
 
@@ -47,19 +48,21 @@ def build_request(config, context, purpose="task"):
         raise ValueError("context must be JSON serializable") from None
     questions = {}
     for role in ROLES:
-        options = {model_id: f"{model_id} (tier {spec.get('tier')}, {PROVIDER_LABELS.get(spec.get('provider'), spec.get('provider'))})"
+        options = {model_id: f"{model_id} ({STRENGTH.get(spec.get('tier'), 'strong')}, "
+                             f"{PROVIDER_LABELS.get(spec.get('provider'), spec.get('provider'))})"
                    for model_id, spec in _eligible(config, role).items()}
-        # No lean toward the defaults: Jev weighs every approved model for this task.
+        # No lean toward the defaults or toward the cheaper: Jev weighs every approved model by what it can do.
         questions[role] = _choice(
-            f"Choose the approved {role} model that best fits this task, comparing all options on equal terms. "
-            "Pick a higher tier whenever the task's difficulty, risk or size benefits from it, and a lower tier when "
-            "it is simple and well specified. Choose even when uncertain, and report your confidence honestly.",
+            f"Choose the approved {role} model most likely to get this task right the first time. Capability comes "
+            "first: a stronger model for difficult, risky, large or unclear work, and a lighter one only when it would "
+            "do the task just as well, sooner. Price is not a reason either way. Choose even when uncertain, and report "
+            "your confidence honestly.",
             options,
         )
         questions[role + "Effort"] = _choice(
-            f"Choose the reasoning effort the {role} should use for this task. Lower effort suits simple, well-specified "
-            "work; higher effort suits difficult, risky or large work and costs more time and tokens. Choose even when "
-            "uncertain, and report your confidence honestly.",
+            f"Choose the lowest reasoning effort at which the {role} still gets this task right the first time: more for "
+            "difficult, risky or large work, less for small, well-specified work. Choose even when uncertain, and report "
+            "your confidence honestly.",
             EFFORT_OPTIONS,
         )
     return {"model": config.get("jev", {}).get("model"), "state": {"purpose": purpose, "context": context},
