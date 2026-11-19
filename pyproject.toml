@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "t3-event-workflow"
-version = "0.6.0"
+version = "0.6.1"
 description = "Run a GitHub project in T3 Code through one orchestrator session, with workers and pull requests in the background."
 readme = "README.md"
 requires-python = ">=3.11"
