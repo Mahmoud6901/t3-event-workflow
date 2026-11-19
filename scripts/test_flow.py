@@ -260,6 +260,21 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(self.jev_models)
         self.assertFalse([m for m in self.jev_models if m.startswith("gpt-")], self.jev_models)
 
+    def test_a_model_approved_after_a_project_was_bound_reaches_jev_once_t3_lists_it(self):
+        self.t3_caches()  # T3's OpenRouter list has no Gemini 4 Neon yet, so the binding leaves it out.
+        self.bind()
+        self.queue("Fix the login typo")
+        self.start()
+        self.assertNotIn("google/gemini-4-neon", self.jev_models)
+        self.t3_caches(goose=GOOSE_LIST + [{"slug": "google/gemini-4-neon", "name": "Gemini 4 Neon",
+                                            "capabilities": {"optionDescriptors": [{"id": "provider"}]}}])
+        self.jev_answer = {**self.jev_answer, "implementer": "google/gemini-4-neon", "implementerEffort": "high"}
+        self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
+        (call,) = self.start()
+        self.assertIn("google/gemini-4-neon", self.jev_models)
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose", "model": "google/gemini-4-neon",
+                                                       "options": {"provider": "openrouter"}})
+
     def test_a_role_picked_at_setup_runs_on_that_model_whatever_jev_advises(self):
         self.t3_caches()
         self.bind(picks={"implementer": {"model": "anthropic/claude-sonnet-4", "effort": "medium"},

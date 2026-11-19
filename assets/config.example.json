@@ -105,6 +105,14 @@
         "implementer",
         "reviewer"
       ]
+    },
+    "google/gemini-4-neon": {
+      "provider": "acpRegistry_goose",
+      "tier": 2,
+      "roles": [
+        "implementer",
+        "reviewer"
+      ]
     }
   },
   "jev": {

@@ -37,11 +37,12 @@ MODELS = {
     "claude-sonnet-5-5": {"provider": "claudeAgent", "tier": 2, "roles": ["reviewer"]},
     "gpt-6-astra": {"provider": "codex", "tier": 3, "roles": ["implementer"]},
     "claude-opus-5-5": {"provider": "claudeAgent", "tier": 3, "roles": ["reviewer", "devops"]},
-    # OpenRouter models run through T3's goose provider instance. None of these four declares thinking_effort in T3.
+    # OpenRouter models run through T3's goose provider instance. None of these declares thinking_effort in T3.
     "deepseek/deepseek-v4.1-flash": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
     "google/gemini-4-argon": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
     "qwen/qwen3.8-flash": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
     "moonshotai/kimi-k3.1-pro": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
+    "google/gemini-4-neon": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer"]},  # From 2026-11-18.
 }
 DEFAULTS = {"implementer": "gpt-6.1-sol", "implementerEffort": "xhigh", "reviewer": "claude-sonnet-5-5",
             "reviewerEffort": "xhigh", "devops": "claude-opus-5-5", "devopsEffort": "xhigh"}
@@ -316,7 +317,10 @@ class Flow:
     def load(self, project):
         row = self.db.execute("SELECT config, state FROM projects WHERE id=?", (project,)).fetchone()
         require(row, f"Project {project} has no binding")
-        return json.loads(row[0]), json.loads(row[1])
+        config = json.loads(row[0])
+        # A model approved after the project was bound joins its list; Jev weighs only the ones T3 runs at the time.
+        config["models"] = {**MODELS, **(config.get("models") or {})}
+        return config, json.loads(row[1])
 
     def transact(self, project, change, op):
         """change(config, state) runs inside one write transaction; the state it leaves is saved with the next version."""
@@ -618,10 +622,13 @@ class Flow:
                         health.failed(self.path.parent, "github", error)
             picks = state.get("picks") or {}  # Jev advises only roles whose model the user left on default.
             advised = {role for role in jev.ROLES if not (picks.get(role) or {}).get("model")}
+            lists, _ = t3_lists() if advised and ready else (None, {})
+            weighed = {**config, "models": {m: item for m, item in config["models"].items()
+                                            if runs(lists, m, item["provider"]) is not False}}
             for task_id in sorted(ready) if advised else ():
                 task = state["tasks"][task_id]
                 try:
-                    choices[task_id] = self.jev(config, {"request": task["task"], "brief": task["brief"], "plan": task["plan"]}) or {}
+                    choices[task_id] = self.jev(weighed, {"request": task["task"], "brief": task["brief"], "plan": task["plan"]}) or {}
                     health.ok(self.path.parent, "jev")
                 except Exception as error:  # noqa: BLE001 - Jev is advice; the defaults stand in
                     health.failed(self.path.parent, "jev", error)
