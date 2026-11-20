@@ -1,4 +1,4 @@
-"""Jev's advice for one task of the delegated PR workflow: the implementer's and reviewer's model and effort."""
+"""Jev's advice for one new worker of the delegated PR workflow: its model, and for an implementer its effort."""
 import json
 import unittest
 from unittest.mock import patch
@@ -18,11 +18,22 @@ def envelope(payload, choices):
 
 
 class TaskAdviceTests(unittest.TestCase):
-    def test_a_task_asks_only_for_its_workers_models_and_efforts_among_the_approved_ones(self):
+    def test_a_task_asks_only_for_its_implementers_model_and_effort_among_the_approved_ones(self):
         payload = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task")
-        self.assertEqual(set(payload["questions"]), {"implementer", "implementerEffort", "reviewer", "reviewerEffort"})
+        self.assertEqual(set(payload["questions"]), {"implementer", "implementerEffort"})
         self.assertNotIn("claude-opus-5-5", payload["questions"]["implementer"]["criteria"])
-        self.assertIn("claude-opus-5-5", payload["questions"]["reviewer"]["criteria"])
+
+    def test_another_role_is_asked_for_its_model_alone_among_its_own_approved_ones(self):
+        reviewer = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task", "reviewer")["questions"]
+        self.assertEqual(set(reviewer), {"reviewer"})
+        self.assertIn("claude-opus-5-5", reviewer["reviewer"]["criteria"])
+        self.assertNotIn("gpt-6.2-sol", reviewer["reviewer"]["criteria"])
+        devops = jev.build_request(CONFIG, {}, "task", "devops")["questions"]
+        self.assertEqual(set(devops), {"devops"})
+        self.assertEqual(set(devops["devops"]["criteria"]),
+                         {"claude-sonnet-5-5", "claude-opus-5-5", "z-ai/glm-5.3-prime", "google/gemini-4-neon"})
+        with self.assertRaises(ValueError):
+            jev.build_request(CONFIG, {}, "task", "orchestrator")
 
     def test_jev_weighs_how_strong_each_model_is_and_not_what_it_costs(self):
         questions = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task")["questions"]
@@ -35,11 +46,18 @@ class TaskAdviceTests(unittest.TestCase):
 
     def test_valid_choices_are_kept_and_an_invalid_one_is_left_to_the_defaults(self):
         payload = jev.build_request(CONFIG, {}, "task")
-        answer = envelope(payload, {"implementer": "gpt-6.2-astra", "implementerEffort": "xhigh",
-                                    "reviewer": "claude-opus-5-5", "reviewerEffort": "extreme"})
+        answer = envelope(payload, {"implementer": "gpt-6.2-astra", "implementerEffort": "xhigh"})
         with patch.object(jev, "_fetch", return_value=(answer, None)):
             choice = flow.default_jev(CONFIG, {"request": "Fix the login typo"})
-        self.assertEqual(choice, {"implementer": "gpt-6.2-astra", "reviewer": "claude-opus-5-5", "implementerEffort": "xhigh"})
+        self.assertEqual(choice, {"implementer": "gpt-6.2-astra", "implementerEffort": "xhigh"})
+        answer = envelope(payload, {"implementer": "gpt-6.2-astra", "implementerEffort": "extreme"})
+        with patch.object(jev, "_fetch", return_value=(answer, None)):
+            choice = flow.default_jev(CONFIG, {"request": "Fix the login typo"})
+        self.assertEqual(choice, {"implementer": "gpt-6.2-astra"})
+        payload = jev.build_request(CONFIG, {}, "task", "reviewer")
+        with patch.object(jev, "_fetch", return_value=(envelope(payload, {"reviewer": "z-ai/glm-5.3-prime"}), None)):
+            choice = flow.default_jev(CONFIG, {"request": "Fix the login typo"}, "reviewer")
+        self.assertEqual(choice, {"reviewer": "z-ai/glm-5.3-prime"})
 
     def test_an_unreachable_service_is_reported_so_the_defaults_stand_with_a_health_problem(self):
         with patch.object(jev, "_fetch", return_value=(None, "connection_error")):

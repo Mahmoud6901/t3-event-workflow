@@ -40,7 +40,7 @@ class HomeTests(unittest.TestCase):
 
     def bind_shared(self, project, workspace, thread):
         """A binding the way 0.3.0 kept it: in the shared database."""
-        engine = flow.Flow(self.db, hub=lambda repo: None, jev=lambda config, context: {})
+        engine = flow.Flow(self.db, hub=lambda repo: None, jev=lambda config, context, role: {})
         try:
             engine.orchestrator({"op": "init", "projectId": project, "threadId": thread, "workspace": str(workspace),
                                  "repo": "owner/app", "requiredChecks": ["acceptance"], "noChecksReason": "Test"})

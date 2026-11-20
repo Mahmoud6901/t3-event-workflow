@@ -50,7 +50,7 @@ class WatchTests(unittest.TestCase):
 
     def op(self, op, **fields):
         result = harness.run(["--db", str(self.db)], json.dumps({"op": op, "projectId": PROJECT, "threadId": ORCH, **fields}),
-                             hub=lambda repo: None, jev=lambda config, context: {})
+                             hub=lambda repo: None, jev=lambda config, context, role: {})
         self.assertTrue(result["ok"], result)
         return result
 

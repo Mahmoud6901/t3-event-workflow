@@ -35,6 +35,11 @@ CODEX_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [
     {"id": "reasoningEffort", "options": levels("low", "medium", "high", "xhigh", "max", "ultra")}]}}
               for s in ("gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra")]
 
+# The approved OpenRouter models that stand in for a role whose own model is at its usage limit.
+STAND_INS = GOOSE_LIST + [{"slug": s, "name": s, "capabilities": {"optionDescriptors": [{"id": "provider"}, {"id": "mode"}]}}
+                          for s in ("z-ai/glm-5.3-prime", "google/gemini-4-neon")]
+SPENT = [{"id": "five_hour", "kind": "session", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]
+
 ORCH = "thread-orch"
 PROJECT = "proj-1"
 REPO = "owner/app"
@@ -167,10 +172,13 @@ class FlowTests(unittest.TestCase):
     def call(self, request):
         return harness.run(["--db", str(self.db)], json.dumps(request), hub=lambda repo: self.hub, jev=self.advise)
 
-    def advise(self, config, context):
+    def advise(self, config, context, role):
+        """Jev, as flow.default_jev answers: the role's model, and an implementer's effort."""
         self.jev_asked = getattr(self, "jev_asked", 0) + 1
+        self.jev_roles = [*getattr(self, "jev_roles", []), role]
         self.jev_models = sorted(config["models"])
-        return dict(self.jev_answer)
+        return {key: self.jev_answer[key] for key in (role, *([role + "Effort"] if role == "implementer" else []))
+                if key in self.jev_answer}
 
     def orchestrator(self, op, **fields):
         return self.call({"op": op, "projectId": PROJECT, "threadId": ORCH, **fields})
@@ -202,16 +210,18 @@ class FlowTests(unittest.TestCase):
         self.assertEqual([c["call"] for c in again["calls"]], [call["call"]])
         self.assertEqual(again["calls"][0]["arguments"]["clientRequestId"], call["call"])
 
-    def t3_caches(self, goose=GOOSE_LIST, claude=CLAUDE_LIST, codex=CODEX_LIST, **goose_top):
-        """T3's provider caches as T3 writes them; None leaves that provider's out, as when it is not installed."""
+    def t3_caches(self, goose=GOOSE_LIST, claude=CLAUDE_LIST, codex=CODEX_LIST, usage=None, **goose_top):
+        """T3's provider caches as T3 writes them; None leaves that provider's out, as when it is not installed. `usage`
+        gives a provider's usage windows, as T3 shows its limits."""
         self.caches.mkdir(exist_ok=True)
         for provider, models, top in (("claudeAgent", claude, {}), ("codex", codex, {}), ("acpRegistry_goose", goose, goose_top)):
             path = self.caches / f"{provider}.json"
             if models is None:
                 path.unlink(missing_ok=True)
                 continue
+            limits = {"usageLimits": {"windows": usage[provider]}} if provider in (usage or {}) else {}
             path.write_text(json.dumps({"enabled": True, "installed": True, "status": "ready",
-                                        "auth": {"status": "authenticated"}, "models": models, **top}))
+                                        "auth": {"status": "authenticated"}, "models": models, **limits, **top}))
 
     def test_setup_searches_every_model_t3_can_run_by_name_before_the_project_is_bound(self):
         self.t3_caches()
@@ -252,12 +262,12 @@ class FlowTests(unittest.TestCase):
                                                        "options": {"effort": "xhigh"}})
 
     def test_jev_advises_only_among_the_models_t3_can_run(self):
-        self.t3_caches(codex=None)
-        self.bind(picks={"implementer": "claude-haiku-5-5"})
+        self.t3_caches(goose=None)
+        self.bind()
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         self.orchestrator("next")
-        self.assertTrue(self.jev_models)
-        self.assertFalse([m for m in self.jev_models if m.startswith("gpt-")], self.jev_models)
+        self.assertIn("gpt-6.2-sol", self.jev_models)
+        self.assertFalse([m for m in self.jev_models if "/" in m], self.jev_models)
 
     def test_a_model_approved_after_a_project_was_bound_reaches_jev_once_t3_lists_it(self):
         self.t3_caches()  # T3's OpenRouter list has no Gemini 4 Neon yet, so the binding leaves it out.
@@ -296,12 +306,122 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose", "model": "anthropic/claude-sonnet-4",
                                                        "options": {"provider": "openrouter", "thinking_effort": "medium"}})
 
-    def test_jev_is_not_asked_when_every_role_it_advises_on_is_picked(self):
+    def test_jev_is_not_asked_when_the_implementers_model_is_picked(self):
         self.t3_caches()
-        self.bind(picks={"implementer": "qwen/qwen3.8-flash", "reviewer": "qwen/qwen3.8-max"})
+        self.bind(picks={"implementer": "qwen/qwen3.8-flash"})
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         self.assertTrue(self.orchestrator("next")["calls"])
         self.assertEqual(getattr(self, "jev_asked", 0), 0)
+
+    def test_jev_is_asked_about_the_implementer_alone_so_the_reviewer_and_devops_run_on_their_own_models(self):
+        self.t3_caches(goose=STAND_INS)
+        self.jev_answer.update(reviewer="claude-haiku-5-5", devops="google/gemini-4-neon")
+        _, review, tree = self.to_review()
+        self.assertEqual(review["arguments"]["target"]["model"], "claude-opus-5-5")
+        head = git(tree, "rev-parse", "HEAD")
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve", "--sha", head)["ok"])
+        (devops,) = self.start()
+        self.assertEqual(devops["arguments"]["target"]["model"], "claude-sonnet-5-5")
+        self.assertEqual(self.jev_roles, ["implementer"])
+
+    def test_a_reviewer_whose_model_is_at_its_usage_limit_runs_on_jevs_stand_in_from_another_provider(self):
+        self.t3_caches(goose=STAND_INS)
+        self.bind()
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        worker, token, tree = self.implement(call, "export const name = 1;\n", 7)
+        self.assertTrue(self.worker("pr", worker, token, "--pr", "7", path=tree)["ok"])
+        self.t3_caches(goose=STAND_INS, usage={"claudeAgent": SPENT})
+        self.jev_answer["reviewer"] = "z-ai/glm-5.3-prime"
+        (review,) = self.start()
+        self.assertEqual(review["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose",
+                                                         "model": "z-ai/glm-5.3-prime", "options": {"provider": "openrouter"}})
+        self.assertEqual(self.jev_roles, ["implementer", "reviewer"])
+        self.assertFalse([m for m in self.jev_models if m.startswith("claude-")], "no Claude model has capacity")
+        self.assertIn("claude-opus-5-5 is at its usage limit, so a new reviewer runs on z-ai/glm-5.3-prime until it resets.",
+                      self.last_step["tell"])
+        self.assertEqual(self.status()["models"]["reviewer"]["model"], "claude-opus-5-5", "the role's own model stays")
+
+    def test_a_limit_that_has_reset_and_one_for_another_model_family_change_nothing(self):
+        self.t3_caches(goose=STAND_INS, usage={"claudeAgent": [
+            {"id": "five_hour", "usedPercent": 100, "resetsAt": "2020-01-01T00:00:00.000Z"},
+            {"id": "seven_day", "usedPercent": 99, "resetsAt": "2999-01-01T00:00:00.000Z"},
+            {"id": "seven_day_fable", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]})
+        self.assertEqual(flow.t3_limits(), {"claudeAgent": {"fable"}})
+        self.jev_answer["reviewer"] = "z-ai/glm-5.3-prime"
+        _, review, _ = self.to_review()
+        self.assertEqual(review["arguments"]["target"]["model"], "claude-opus-5-5")
+        self.assertEqual(self.jev_roles, ["implementer"])
+
+    def test_a_model_the_user_picked_is_stood_in_for_at_its_limit_and_runs_again_once_it_resets(self):
+        spent = {"codex": [{"id": "primary", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]}
+        self.t3_caches(goose=STAND_INS, usage=spent)
+        self.bind(picks={"implementer": "gpt-6.2-astra"})
+        self.jev_answer["implementer"] = "claude-haiku-5-5"
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "claudeAgent", "model": "claude-haiku-5-5",
+                                                       "options": {"effort": "medium"}})
+        self.assertFalse([m for m in self.jev_models if m.startswith("gpt-")], "no Codex model has capacity")
+        self.t3_caches(goose=STAND_INS)
+        self.assertTrue(self.orchestrator("restart", task="Fix the login typo", authorization="Restart it.")["ok"])
+        fresh = [c for c in self.start() if c["tool"] == "delegate_task"]
+        self.assertEqual([c["arguments"]["target"]["model"] for c in fresh], ["gpt-6.2-astra"])
+
+    def test_a_stand_in_takes_jevs_effort_when_the_users_is_a_level_only_their_own_model_has(self):
+        spent = {"codex": [{"id": "primary", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]}
+        self.t3_caches(goose=STAND_INS)
+        self.bind(picks={"implementer": {"model": "gpt-6.2-astra", "effort": "ultra"}})
+        self.t3_caches(goose=STAND_INS, usage=spent)
+        self.jev_answer["implementer"] = "claude-haiku-5-5"
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "claudeAgent", "model": "claude-haiku-5-5",
+                                                       "options": {"effort": "medium"}})
+
+    def test_a_task_restarted_after_the_limit_reset_is_advised_afresh_and_leaves_its_stand_in(self):
+        spent = {"codex": [{"id": "primary", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]}
+        self.t3_caches(goose=STAND_INS, usage=spent)
+        self.bind(picks={"reviewer": "claude-opus-5-5"})
+        self.jev_answer["implementer"] = "claude-haiku-5-5"
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"]["model"], "claude-haiku-5-5")
+        self.t3_caches(goose=STAND_INS)
+        self.jev_answer["implementer"] = "gpt-6.2-astra"
+        self.assertTrue(self.orchestrator("restart", task="Fix the login typo", authorization="Restart it.")["ok"])
+        fresh = [c for c in self.start() if c["tool"] == "delegate_task"]
+        self.assertEqual([c["arguments"]["target"]["model"] for c in fresh], ["gpt-6.2-astra"])
+        self.assertEqual(self.jev_roles, ["implementer", "implementer"])
+
+    def test_a_restart_during_a_limit_starts_the_new_worker_on_a_stand_in(self):
+        self.t3_caches(goose=STAND_INS)
+        _, review, _ = self.to_review()
+        self.assertEqual(review["arguments"]["target"]["model"], "claude-opus-5-5")
+        self.t3_caches(goose=STAND_INS, usage={"claudeAgent": SPENT})
+        self.jev_answer["reviewer"] = "google/gemini-4-neon"
+        self.assertTrue(self.orchestrator("restart", task="Fix the login typo", authorization="It is stuck at its limit.")["ok"])
+        fresh = [c for c in self.start() if c["tool"] == "delegate_task"]
+        self.assertEqual([c["arguments"]["target"]["model"] for c in fresh], ["google/gemini-4-neon"])
+
+    def test_with_no_other_provider_to_run_on_the_worker_keeps_its_model_and_jev_is_not_asked(self):
+        self.t3_caches(goose=None, usage={"claudeAgent": SPENT})
+        _, review, _ = self.to_review()
+        self.assertEqual(review["arguments"]["target"]["model"], "claude-opus-5-5")
+        self.assertEqual(self.jev_roles, ["implementer"])
+
+    def test_devops_at_its_usage_limit_runs_on_a_stand_in(self):
+        self.t3_caches(goose=STAND_INS)
+        _, review, tree = self.to_review()
+        head = git(tree, "rev-parse", "HEAD")
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve", "--sha", head)["ok"])
+        self.t3_caches(goose=STAND_INS, usage={"claudeAgent": SPENT})
+        self.jev_answer["devops"] = "google/gemini-4-neon"
+        (devops,) = self.start()
+        self.assertEqual(devops["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose",
+                                                         "model": "google/gemini-4-neon", "options": {"provider": "openrouter"}})
+        self.assertIn("claude-sonnet-5-5 is at its usage limit, so a new DevOps runs on google/gemini-4-neon until it resets.",
+                      self.last_step["tell"])
 
     def test_an_effort_set_alone_wins_over_jevs_and_jev_still_picks_the_model(self):
         self.jev_answer["implementer"] = "gpt-6.2-sol"
@@ -428,7 +548,7 @@ class FlowTests(unittest.TestCase):
         argv = ["--db", str(self.db), "worker", command, "--worker", worker, "--token", token, *args]
         if path:
             argv += ["--path", str(path)]
-        return harness.run(argv, hub=lambda repo: self.hub, jev=lambda config, context: dict(self.jev_answer))
+        return harness.run(argv, hub=lambda repo: self.hub, jev=self.advise)
 
     def status(self):
         result = self.orchestrator("status")
@@ -452,7 +572,7 @@ class FlowTests(unittest.TestCase):
         (review,) = self.start()
         arguments = review["arguments"]
         self.assertEqual((arguments["isolation"], arguments["role"]), ("shared", "review"))
-        self.assertEqual(arguments["target"]["model"], "claude-sonnet-5-5")
+        self.assertEqual(arguments["target"]["model"], "claude-opus-5-5")
         head = git(tree, "rev-parse", "HEAD")
         self.assertIn(head, arguments["task"])
         self.assertIn(str(tree.resolve()).replace("\\", "/"), arguments["task"])

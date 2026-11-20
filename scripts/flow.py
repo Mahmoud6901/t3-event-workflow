@@ -38,8 +38,8 @@ MODELS = {
     "claude-opus-5-5": {"provider": "claudeAgent", "tier": 3, "roles": ["reviewer", "devops"]},
     # OpenRouter models run through T3's goose provider instance. None of these declares thinking_effort in T3.
     "deepseek/deepseek-v4.1-flash-1017": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
-    "z-ai/glm-5.3-prime": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer"]},
-    "google/gemini-4-neon": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer"]},
+    "z-ai/glm-5.3-prime": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer", "devops"]},
+    "google/gemini-4-neon": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer", "devops"]},
 }
 RETIRED = {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "deepseek/deepseek-v4.1-flash", "google/gemini-4-argon",
            "qwen/qwen3.8-flash", "moonshotai/kimi-k3.1-pro"}  # Gone from every project's list, even one bound with them.
@@ -188,6 +188,56 @@ def runs(lists, model, provider):
     return None if lists is None else model in lists.get(provider, {})
 
 
+def t3_limits():
+    """The usage limits T3 shows as spent: {provider: the model families covered, "" standing for every model}. A window
+    counts while it is full and its reset is still ahead. T3 names a family's own window after the general one
+    (seven_day_fable beside seven_day), and that one covers only the models named so."""
+    spent = {}
+    for provider in PROVIDERS:
+        try:
+            cache = json.loads((Path(T3_CACHES) / f"{provider}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        usage = cache.get("usageLimits") if isinstance(cache, dict) else None
+        windows = [w for w in (usage.get("windows") if isinstance(usage, dict) else None) or [] if isinstance(w, dict)]
+        ids = {window.get("id") for window in windows}
+        for window in windows:
+            used = window.get("usedPercent")
+            if isinstance(used, bool) or not isinstance(used, (int, float)) or used < 100 or passed(window.get("resetsAt")):
+                continue
+            base, _, family = str(window.get("id") or "").rpartition("_")
+            spent.setdefault(provider, set()).add(family if base in ids else "")
+    return spent
+
+
+def passed(moment):
+    """Whether a time T3 wrote is behind us. One that cannot be read is not: a full window with no clear reset counts."""
+    try:
+        at = datetime.fromisoformat(str(moment).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) <= datetime.now(timezone.utc)
+
+
+def at_limit(spent, model, provider):
+    """Whether the model's provider has a spent usage limit that covers it."""
+    return any(family in model for family in spent.get(provider, ()))
+
+
+def usual(config, state, role):
+    """The model a role runs on without advice, and its provider: the user's pick, else the default."""
+    pick = (state.get("picks") or {}).get(role) or {}
+    if pick.get("model"):
+        return pick["model"], pick.get("provider", GOOSE)
+    model = config["defaults"][role]
+    return model, (config["models"].get(model) or {}).get("provider")
+
+
+def described(task):
+    """What Jev is told about a task."""
+    return {"request": task["task"], "brief": task["brief"], "plan": task["plan"]}
+
+
 def devops_on(state, name):
     """A plan keeps the DevOps mode it started with; one not started yet follows the binding's current mode."""
     plan = state["plans"][name]
@@ -211,8 +261,9 @@ def update_fix(config, outcome, number):
 
 
 def role_model(config, state, role):
-    """What a new worker in this role starts on: the user's model and effort where set, else the defaults. For an
-    implementer or reviewer, Jev may advise another model, and an effort the user did not set."""
+    """What a new worker in this role starts on: the user's model and effort where set, else the defaults. Jev may
+    advise an implementer's model and effort where the user set none, and stands in for any role's model that is at
+    its usage limit."""
     pick = (state.get("picks") or {}).get(role) or {}
     return {"model": pick.get("model") or config["defaults"][role], "modelSource": "pick" if pick.get("model") else "default",
             "effort": pick.get("effort") or config["defaults"][role + "Effort"],
@@ -256,10 +307,10 @@ def settle_pick(role, current, raw, defaults, lists):
     return pick
 
 
-def default_jev(config, context):
-    """Jev's valid implementer and reviewer model and effort for one task; the rest fall back to the defaults.
-    Raises when Jev gives no answer, so `next` records the problem and uses the defaults."""
-    decision = jev.evaluate(config, context, "task")
+def default_jev(config, context, role="implementer"):
+    """Jev's valid model for one role of one task, and an implementer's effort; the rest fall back to the defaults.
+    Raises when Jev gives no answer, so the caller records the problem and uses the defaults."""
+    decision = jev.evaluate(config, context, "task", role=role)
     if decision["status"] != "decided":
         raise RuntimeError(f"Jev gave no advice: {decision['reason']}")
     return {**decision["selectedModels"], **{r + "Effort": e for r, e in decision["selectedEfforts"].items()}}
@@ -621,19 +672,20 @@ class Flow:
                         health.ok(self.path.parent, "github")
                     except github.Failed as error:  # The rule waits for the next wake.
                         health.failed(self.path.parent, "github", error)
-            picks = state.get("picks") or {}  # Jev advises only roles whose model the user left on default.
-            advised = {role for role in jev.ROLES if not (picks.get(role) or {}).get("model")}
-            lists, _ = t3_lists() if advised and ready else (None, {})
-            weighed = {**config, "models": {m: item for m, item in config["models"].items()
-                                            if runs(lists, m, item["provider"]) is not False}}
-            for task_id in sorted(ready) if advised else ():
-                task = state["tasks"][task_id]
-                try:
-                    choices[task_id] = self.jev(weighed, {"request": task["task"], "brief": task["brief"], "plan": task["plan"]}) or {}
-                    health.ok(self.path.parent, "jev")
-                except Exception as error:  # noqa: BLE001 - Jev is advice; the defaults stand in
-                    health.failed(self.path.parent, "jev", error)
-                    choices[task_id] = {}
+            reviews = sorted(t["id"] for t in state["tasks"].values() if t["state"] == "review_needed")
+            merges = any(devops_on(state, name) and state["devops"].get(name, {}).get("state", "none") == "none"
+                         and any(t["plan"] == name and t["state"] in {"approved", "confirmed", "ci_failed"}
+                                 for t in state["tasks"].values()) for name in state["plans"])
+            if ready or reviews or merges:
+                lists, spent = t3_lists()[0], t3_limits()
+                for role, task_ids in (("implementer", sorted(ready)), ("reviewer", reviews)):
+                    for task_id in task_ids:
+                        choices[role, task_id] = self.advise(config, state, role, described(state["tasks"][task_id]),
+                                                             lists, spent)
+                if merges:  # One DevOps serves a whole plan, so its stand-in is not a task's.
+                    choices["devops"] = self.advise(config, state, "devops", {
+                        "request": "Merge the plan's confirmed pull requests through GitHub and triage CI failures"},
+                        lists, spent)
 
         def change(config, state):
             for worker in state["workers"].values():
@@ -645,14 +697,14 @@ class Flow:
                     if task["state"] == "waiting" and self.unblocked(state, task) and self.parked(state, task):
                         self.resume(config, state, task)
                     elif task["state"] == "waiting" and self.unblocked(state, task):
-                        self.start_implementer(config, state, task, choices.get(task["id"]))
+                        self.start_implementer(config, state, task, choices.get(("implementer", task["id"])))
                     elif task["state"] == "review_needed":
-                        self.start_reviewer(config, state, task)
+                        self.start_reviewer(config, state, task, choices.get(("reviewer", task["id"])))
                     elif task["state"] == "approved" and task["id"] in facts and facts[task["id"]][0] == task["rev"]:
                         self.confirm(state, task, *facts[task["id"]][1:])
                     elif task["state"] == "implementing" and task.get("fix"):
                         self.send_fix(config, state, task)
-                self.call_devops(config, state)
+                self.call_devops(config, state, choices.get("devops"))
             calls = list(state["calls"].values())
             told, state["tell"] = state["tell"], []
             asks = [a for a in state["asks"].values() if not a.get("asked")]
@@ -713,10 +765,22 @@ class Flow:
         text(req.get("authorization"), "authorization (the user's own words)")
         name = text(req.get("task"), "task")
 
+        def role_of(task):
+            where = task.get("blockedFrom") if task["state"] == "blocked" else task["state"]
+            return {"implementing": "implementer", "reviewing": "reviewer", "merging": "devops"}.get(where)
+
+        config, state = self.load(project)
+        task = state["tasks"][self.task_id(state, name)]
+        kept = task.get("choice") or {}  # Jev's advice at the task's first start.
+        advice, spent = {}, t3_limits()
+        # With a limit spent the new worker may need a stand-in, and one that had a stand-in is advised afresh.
+        if (spent or kept.get("limit")) and role_of(task) in ("implementer", "reviewer"):
+            advice = self.advise(config, state, role_of(task), described(task), t3_lists()[0], spent)
+        kept = {} if kept.get("limit") else kept
+
         def change(config, state):
             task = state["tasks"][self.task_id(state, name)]
-            where = task.get("blockedFrom") if task["state"] == "blocked" else task["state"]
-            role = {"implementing": "implementer", "reviewing": "reviewer", "merging": "devops"}.get(where)
+            role = role_of(task)
             require(role, f"{task['id']} is {task['state']}; no worker of it can be restarted")
             old = state["workers"].get(task.get("blockedWorker") or task.get(role))
             if old:
@@ -727,9 +791,9 @@ class Flow:
                 if ask["task"] == task["id"] and not ask.get("answered"):
                     ask["answered"] = "restarted"
             if role == "implementer":
-                self.start_implementer(config, state, task, task.get("choice"))
+                self.start_implementer(config, state, task, advice or kept)
             elif role == "reviewer":
-                self.start_reviewer(config, state, task)
+                self.start_reviewer(config, state, task, advice)
             else:
                 state["devops"][task["plan"]] = {"worker": None, "state": "none"}
                 task.pop("devops", None)
@@ -904,23 +968,55 @@ class Flow:
         task["rev"] += 1
 
     def add_worker(self, config, state, role, plan, task_id, choice=None):
-        """Model and effort each come from the user's setting for the role; else Jev's advice (when the user set no model,
-        and it names an approved one); else the default. The worker keeps its model entry, so a later change never
-        reaches a worker already started."""
+        """Model and effort each come from the user's setting for the role; else Jev's advice (it names an approved
+        model); else the default. Advice marked "limit" stands in for a model at its usage limit, the user's own
+        included. The worker keeps its model entry, so a later change never reaches a worker already started."""
         pick = (state.get("picks") or {}).get(role) or {}
-        choice = {} if pick.get("model") else (choice or {})
-        model = choice.get(role) if role in (config["models"].get(choice.get(role)) or {}).get("roles", []) else None
+        choice = choice or {}
+        stand_in = bool(choice.get("limit"))
+        advised = choice.get(role) if role in (config["models"].get(choice.get(role)) or {}).get("roles", []) else None
+        model = advised if stand_in or not pick.get("model") else None
         effort = choice.get(role + "Effort") if choice.get(role + "Effort") in EFFORTS else None
+        chosen = pick.get("effort")
+        if model and stand_in and chosen not in EFFORTS:
+            chosen = None  # A level only the user's own model has does not carry to its stand-in.
         worker = {"id": next_id(state, "w"), "token": secrets.token_hex(16), "role": role, "plan": plan, "task": task_id,
                   "model": model or config["defaults"][role],
-                  "effort": pick.get("effort") or effort or config["defaults"][role + "Effort"],
-                  "modelSource": "jev" if model else "default", "childThreadId": None, "taskIds": [], "state": "prepared",
-                  "job": None, "path": None}
-        if pick.get("model"):
+                  "effort": chosen or effort or config["defaults"][role + "Effort"],
+                  "modelSource": ("limit" if stand_in else "jev") if model else "default", "childThreadId": None,
+                  "taskIds": [], "state": "prepared", "job": None, "path": None}
+        if pick.get("model") and not model:
             worker.update(model=pick["model"], modelSource="pick",
                           entry={"provider": pick.get("provider", GOOSE), "roles": [role], "thinking": pick.get("thinking", False)})
+        if model and stand_in:
+            line = (f"{choice['limit']} is at its usage limit, so a new {'DevOps' if role == 'devops' else role} runs on "
+                    f"{model} until it resets.")
+            if line not in state["tell"]:
+                state["tell"].append(line)
         state["workers"][worker["id"]] = worker
         return worker
+
+    def advise(self, config, state, role, context, lists, spent):
+        """Jev's advice for one new worker, {} without any. Jev chooses an implementer's model where the user left it
+        open, and its effort. A model the user picked, and a reviewer's or DevOps's, it replaces only while that model is
+        at its usage limit: then with an approved model of a provider that has capacity, marked "limit"."""
+        model, provider = usual(config, state, role)
+        out = at_limit(spent, model, provider)
+        picked = bool(((state.get("picks") or {}).get(role) or {}).get("model"))
+        if not out and (role != "implementer" or picked):
+            return {}
+        weighed = {**config, "models": {m: item for m, item in config["models"].items()
+                                        if runs(lists, m, item["provider"]) is not False
+                                        and not at_limit(spent, m, item["provider"])}}
+        if not any(role in item.get("roles", []) for item in weighed["models"].values()):
+            return {}  # Nothing else can run, so the worker waits for the reset on its own model.
+        try:
+            choice = self.jev(weighed, context, role) or {}
+            health.ok(self.path.parent, "jev")
+        except Exception as error:  # noqa: BLE001 - Jev is advice; the defaults stand in
+            health.failed(self.path.parent, "jev", error)
+            return {}
+        return {**choice, **({"limit": model} if out else {})}
 
     def delegate(self, config, state, worker, title, role, isolation, brief):
         call_id = f"{worker['id']}-start"
@@ -942,8 +1038,8 @@ class Flow:
         self.delegate(config, state, worker, f"{task['plan']}: {task['task']}", "implementation", "worktree",
                       implementer_brief(config, state, task, worker))
 
-    def start_reviewer(self, config, state, task):
-        worker = self.add_worker(config, state, "reviewer", task["plan"], task["id"], task.get("choice"))
+    def start_reviewer(self, config, state, task, choice=None):
+        worker = self.add_worker(config, state, "reviewer", task["plan"], task["id"], choice)
         worker["job"] = {"kind": "review", "reported": False, "nudged": 0}
         task["reviewer"] = worker["id"]
         self.move(task, "reviewing")
@@ -1008,7 +1104,7 @@ class Flow:
             fix["detail"], guide, "Then push (opening the PR as your brief says if there is none yet), and run: "
             + command("worker", "pr", me, "--pr", number), "When it succeeds, end your turn."] if line]))
 
-    def call_devops(self, config, state):
+    def call_devops(self, config, state, choice=None):
         """One DevOps worker per plan with work for it: started the first time, woken by a follow-up when idle.
         While a merge runs nobody is called: take would give them nothing."""
         if any(t["state"] == "merging" for t in state["tasks"].values()):
@@ -1019,7 +1115,7 @@ class Flow:
                 continue
             entry = state["devops"].setdefault(name, {"worker": None, "state": "none"})
             if entry["state"] == "none":
-                worker = self.add_worker(config, state, "devops", name, None)
+                worker = self.add_worker(config, state, "devops", name, None, choice)
                 worker["job"] = {"kind": "devops", "reported": False, "nudged": 0}
                 entry.update(worker=worker["id"], state="working")
                 self.delegate(config, state, worker, f"DevOps: {name}", "general", "worktree", devops_brief(config, name, worker))

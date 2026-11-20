@@ -1,4 +1,4 @@
-"""Jev's advice for one task of the delegated PR workflow: the implementer's and reviewer's model and effort.
+"""Jev's advice for one new worker of the delegated PR workflow: its model, and for an implementer its effort.
 
 The harness owns the workflow and its defaults. This module only builds one request, validates one response and keeps
 the valid choices; anything missing or invalid is left to the defaults (flow.default_jev).
@@ -21,7 +21,8 @@ KEY_ROOT = places.SHARED  # The key file is relative to the shared data folder a
 DEFAULT_KEY_FILE = "secrets/typesafe-api-key.txt"
 MAX_RESPONSE_BYTES = 256_000
 TIMEOUT_SECONDS = 20
-ROLES = ("implementer", "reviewer")
+ROLES = ("implementer", "reviewer", "devops")
+EFFORT_ROLES = ("implementer",)  # Jev sets no other role's effort.
 PROVIDER_LABELS = {"codex": "OpenAI via Codex", "claudeAgent": "Anthropic via Claude", "acpRegistry_goose": "OpenRouter via goose"}
 EFFORT_OPTIONS = {"low": "Quick.", "medium": "Balanced.", "high": "Thorough.",
                   "xhigh": "Very thorough.", "max": "Most thorough and slowest."}
@@ -38,27 +39,30 @@ def _choice(instructions, options):
     return {"type": "choice", "instructions": instructions, "criteria": options}
 
 
-def build_request(config, context, purpose="task"):
-    """The Jev request for one task. Raises ValueError for another purpose or a context JSON cannot hold."""
+def build_request(config, context, purpose="task", role="implementer"):
+    """The Jev request for one role of one task. Raises ValueError for another purpose or role, or a context JSON
+    cannot hold."""
     if purpose != "task":
         raise ValueError("purpose must be 'task'")
+    if role not in ROLES:
+        raise ValueError(f"role is one of {', '.join(ROLES)}")
     try:
         context = json.loads(json.dumps(context, ensure_ascii=False))
     except (TypeError, ValueError):
         raise ValueError("context must be JSON serializable") from None
     questions = {}
-    for role in ROLES:
-        options = {model_id: f"{model_id} ({STRENGTH.get(spec.get('tier'), 'strong')}, "
-                             f"{PROVIDER_LABELS.get(spec.get('provider'), spec.get('provider'))})"
-                   for model_id, spec in _eligible(config, role).items()}
-        # No lean toward the defaults or toward the cheaper: Jev weighs every approved model by what it can do.
-        questions[role] = _choice(
-            f"Choose the approved {role} model most likely to get this task right the first time. Capability comes "
-            "first: a stronger model for difficult, risky, large or unclear work, and a lighter one only when it would "
-            "do the task just as well, sooner. Price is not a reason either way. Choose even when uncertain, and report "
-            "your confidence honestly.",
-            options,
-        )
+    options = {model_id: f"{model_id} ({STRENGTH.get(spec.get('tier'), 'strong')}, "
+                         f"{PROVIDER_LABELS.get(spec.get('provider'), spec.get('provider'))})"
+               for model_id, spec in _eligible(config, role).items()}
+    # No lean toward the defaults or toward the cheaper: Jev weighs every approved model by what it can do.
+    questions[role] = _choice(
+        f"Choose the approved {role} model most likely to get this task right the first time. Capability comes "
+        "first: a stronger model for difficult, risky, large or unclear work, and a lighter one only when it would "
+        "do the task just as well, sooner. Price is not a reason either way. Choose even when uncertain, and report "
+        "your confidence honestly.",
+        options,
+    )
+    if role in EFFORT_ROLES:
         questions[role + "Effort"] = _choice(
             f"Choose the lowest reasoning effort at which the {role} still gets this task right the first time: more for "
             "difficult, risky or large work, less for small, well-specified work. Choose even when uncertain, and report "
@@ -225,16 +229,16 @@ def _answer(envelope, key, expected_options):
     return choice, float(confidence)
 
 
-def evaluate(config, context, purpose="task", response=None):
-    """Jev's valid choices for one task: {"status", "source", "selectedModels", "selectedEfforts", ...}. A failed
-    request or an invalid response gives status "unavailable" with a reason and no choices.
+def evaluate(config, context, purpose="task", response=None, role="implementer"):
+    """Jev's valid choices for one role of one task: {"status", "source", "selectedModels", "selectedEfforts", ...}. A
+    failed request or an invalid response gives status "unavailable" with a reason and no choices.
 
     Supplying ``response`` skips networking and marks the result as a simulation (tests and previews).
     """
     source = "simulation" if response is not None else "jev"
     empty = {"purpose": purpose, "source": source, "selectedModels": {}, "selectedEfforts": {}}
     try:
-        payload = build_request(config, context, purpose)
+        payload = build_request(config, context, purpose, role)
     except ValueError:
         return {"status": "unavailable", "reason": "invalid_context", **empty}
     if response is None:
@@ -245,8 +249,8 @@ def evaluate(config, context, purpose="task", response=None):
         return {"status": "unavailable", "reason": "invalid_response_model", **empty}
     # No confidence threshold: every valid answer applies; a missing or invalid one is left to the defaults.
     parsed = {key: _answer(response, key, question["criteria"]) for key, question in payload["questions"].items()}
-    models = {role: parsed[role][0] for role in ROLES if parsed[role][0] is not None}
-    efforts = {role: parsed[role + "Effort"][0] for role in ROLES if parsed[role + "Effort"][0] is not None}
+    models = {role: parsed[role][0]} if parsed[role][0] is not None else {}
+    efforts = {role: parsed[role + "Effort"][0]} if parsed.get(role + "Effort", (None,))[0] is not None else {}
     return {"status": "decided", **empty, "selectedModels": models, "selectedEfforts": efforts,
             "confidence": {key: answer[1] for key, answer in parsed.items()},
             "jevModel": config.get("jev", {}).get("model"), "jevUsage": response.get("usage"),

@@ -114,7 +114,7 @@ A refused command changes nothing. Its error says what to do.
 
 `init` creates a binding, paused; [setup](setup.md#3-bind-it) lists its fields.
 
-Jev picks, per task, an implementer's or reviewer's model left open, even after "back to default", and its effort unless set. With no answer, the defaults apply.
+Jev picks, per task, an implementer's model left open, even after "back to default", and its effort unless set; a stand-in at a usage limit. No answer: the defaults apply.
 
 **Problems:** `status` lists any background part (watcher scan, its sends, hooks, Jev, GitHub, a
 checkout) that failed three times in a row. A part's next success clears it.

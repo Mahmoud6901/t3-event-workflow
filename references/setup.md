@@ -45,8 +45,11 @@ step 1:
   shown. Offer only a model the list returned.
 - Offer the efforts in the chosen model's `efforts` (none when it is empty). Without a chosen model,
   offer low, medium, high, xhigh or max.
-- A role runs on the model and effort the user chose. For what they skipped, Jev may advise an
-  implementer's or reviewer's model and effort among the models this T3 runs; else the default applies.
+- A role runs on the model and effort the user chose. For an implementer's model and effort they
+  skipped, Jev may advise among the models this T3 runs; else the default applies. A reviewer and
+  DevOps run on the user's choice, else the default.
+- While T3 shows a model's usage limit as spent, Jev starts that role's new workers on an approved
+  model of another provider, over the user's choice too, until the limit resets.
 
 Add the choices to `init`, leaving out what the user skipped:
 `"picks":{"reviewer":{"model":"<model>","effort":"max"},"implementer":{"effort":"xhigh"}}`.

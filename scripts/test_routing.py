@@ -60,7 +60,7 @@ class RoutingTests(unittest.TestCase):
                            ("control", {"action": "activate", "authorization": "Go."})):
             result = harness.run(["--db", str(homes.database(home))], json.dumps({"op": op, "projectId": project, "threadId": thread,
                                                                                   **fields}),
-                                 hub=lambda repo: None, jev=lambda config, context: {})
+                                 hub=lambda repo: None, jev=lambda config, context, role: {})
             self.assertTrue(result["ok"], result)
         return home
 

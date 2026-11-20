@@ -23,6 +23,11 @@ The default models are GPT-6.2-Sol (Codex) for implementers and Opus 5.5 for rev
 both, at setup or later: any model your T3 runs, at any effort T3 offers for it. Setup checks which
 models your T3 can run, and asks you to pick one for any role whose default it cannot run.
 
+With a Jev key, Jev chooses the model and effort of each task's implementer where you left them open.
+Reviewers and DevOps run on your choice or the default. One exception: while T3 shows a model's usage
+limit as spent, Jev starts that role's new workers on an approved model of another provider, and they
+go back to your model when the limit resets.
+
 ```bash
 uv tool install git+https://github.com/Mahmoud6901/t3-event-workflow
 ```

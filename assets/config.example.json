@@ -80,7 +80,8 @@
       "tier": 2,
       "roles": [
         "implementer",
-        "reviewer"
+        "reviewer",
+        "devops"
       ]
     },
     "google/gemini-4-neon": {
@@ -88,7 +89,8 @@
       "tier": 2,
       "roles": [
         "implementer",
-        "reviewer"
+        "reviewer",
+        "devops"
       ]
     }
   },

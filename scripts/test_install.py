@@ -65,7 +65,7 @@ class InstallTests(unittest.TestCase):
         workspace = self.home / "my app"
         (workspace / ".git").mkdir(parents=True)
         with patch.object(flow, "T3_CACHES", self.home / "no-t3"):
-            engine = flow.Flow(state / "harness.sqlite3", hub=lambda repo: None, jev=lambda config, context: {})
+            engine = flow.Flow(state / "harness.sqlite3", hub=lambda repo: None, jev=lambda config, context, role: {})
             engine.orchestrator({"op": "init", "projectId": "app", "threadId": "orch", "workspace": str(workspace),
                                  "repo": "owner/app", "requiredChecks": ["acceptance"], "noChecksReason": "Test"})
             engine.close()

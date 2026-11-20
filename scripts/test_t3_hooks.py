@@ -52,7 +52,7 @@ class HookTests(unittest.TestCase):
 
     def op(self, op, **fields):
         return harness.run(["--db", str(self.db)], json.dumps({"op": op, "projectId": PROJECT, "threadId": ORCH, **fields}),
-                           hub=lambda repo: None, jev=lambda config, context: {})
+                           hub=lambda repo: None, jev=lambda config, context, role: {})
 
     def message(self, text, thread=ORCH, run=1, created_by="user", source="web"):
         """A message in the thread's turn `run`; the turn is running."""

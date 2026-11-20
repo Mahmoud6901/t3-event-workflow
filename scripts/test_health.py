@@ -106,8 +106,8 @@ class PartsReportTests(unittest.TestCase):
         return result
 
     def test_jev_failing_to_answer_is_a_problem_and_its_next_answer_clears_it(self):
-        # The implementer and reviewer fall back to the defaults when Jev is down, so nobody would otherwise learn of it.
-        def down(config, context):
+        # The implementer falls back to the default when Jev is down, so nobody would otherwise learn of it.
+        def down(config, context, role):
             raise RuntimeError("Jev did not decide: http_500_provider_unavailable")
 
         self.op(down, "init", workspace=str(self.state / "app"), repo="owner/app", requiredChecks=["acceptance"], noChecksReason="Test")
@@ -118,7 +118,7 @@ class PartsReportTests(unittest.TestCase):
         self.assertEqual((problem["part"], problem["failures"]), ("jev", 3))
         self.assertIn("http_500_provider_unavailable", problem["lastError"])
         self.op(down, "queue_edit", plan="M30", tasks=[{"task": "Task 3"}])
-        self.op(lambda config, context: {}, "next")
+        self.op(lambda config, context, role: {}, "next")
         self.assertEqual(health.problems(self.state), [])
 
 
