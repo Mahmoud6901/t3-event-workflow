@@ -29,37 +29,16 @@
     "devopsEffort": "high"
   },
   "models": {
-    "claude-haiku-5-5": {
-      "provider": "claudeAgent",
-      "roles": [
-        "implementer",
-        "reviewer"
-      ]
-    },
     "gpt-6.2-sol": {
       "provider": "codex",
       "roles": [
         "implementer"
       ]
     },
-    "claude-sonnet-5-5": {
-      "provider": "claudeAgent",
-      "roles": [
-        "reviewer",
-        "devops"
-      ]
-    },
     "gpt-6.2-astra": {
       "provider": "codex",
       "roles": [
         "implementer"
-      ]
-    },
-    "claude-opus-5-5": {
-      "provider": "claudeAgent",
-      "roles": [
-        "reviewer",
-        "devops"
       ]
     },
     "gemini-4-neon": {
@@ -70,17 +49,16 @@
         "devops"
       ]
     },
-    "deepseek/deepseek-v4.1-flash-1017": {
-      "provider": "acpRegistry_goose",
+    "claude-sonnet-5-5": {
+      "provider": "claudeAgent",
       "roles": [
-        "implementer",
-        "reviewer"
+        "reviewer",
+        "devops"
       ]
     },
-    "z-ai/glm-5.3-prime": {
-      "provider": "acpRegistry_goose",
+    "claude-opus-5-5": {
+      "provider": "claudeAgent",
       "roles": [
-        "implementer",
         "reviewer",
         "devops"
       ]

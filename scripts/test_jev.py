@@ -31,7 +31,7 @@ class TaskAdviceTests(unittest.TestCase):
         devops = jev.build_request(CONFIG, {}, "task", "devops")["questions"]
         self.assertEqual(set(devops), {"devops"})
         self.assertEqual(set(devops["devops"]["criteria"]),
-                         {"claude-sonnet-5-5", "claude-opus-5-5", "z-ai/glm-5.3-prime", "gemini-4-neon"})
+                         {"claude-sonnet-5-5", "claude-opus-5-5", "gemini-4-neon"})
         with self.assertRaises(ValueError):
             jev.build_request(CONFIG, {}, "task", "orchestrator")
 
@@ -40,8 +40,11 @@ class TaskAdviceTests(unittest.TestCase):
         questions = jev.build_request(config, {"request": "Fix the login typo"}, "task")["questions"]
         criteria = questions["implementer"]["criteria"]
         self.assertRegex(criteria["gpt-6.2-sol"], r"^gpt-6\.2-sol \(Terminal-Bench \d+\.\d%, WebDev \d+; OpenAI via Codex\)$")
-        self.assertRegex(criteria["z-ai/glm-5.3-prime"], r"^z-ai/glm-5\.3-prime \(GLM-5\.3's scores: Terminal-Bench ")
         self.assertEqual(criteria["made-up/model"], "made-up/model (no public coding score; OpenAI via Codex)")
+        borrowed = {"gpt-6.2-astra": {"terminalBench": 62.12, "borrowedFrom": "GPT-6.2"}}
+        with patch.object(jev, "_scores", return_value=borrowed):
+            criteria = jev.build_request(CONFIG, {}, "task")["questions"]["implementer"]["criteria"]
+        self.assertEqual(criteria["gpt-6.2-astra"], "gpt-6.2-astra (GPT-6.2's scores: Terminal-Bench 62.1%; OpenAI via Codex)")
         self.assertIn("Terminal-Bench 4.1", questions["implementer"]["instructions"])
         self.assertIn("LMArena WebDev", questions["implementer"]["instructions"])
         reviewer = jev.build_request(CONFIG, {}, "task", "reviewer")["questions"]["reviewer"]
@@ -68,9 +71,9 @@ class TaskAdviceTests(unittest.TestCase):
             choice = flow.default_jev(CONFIG, {"request": "Fix the login typo"})
         self.assertEqual(choice, {"implementer": "gpt-6.2-astra"})
         payload = jev.build_request(CONFIG, {}, "task", "reviewer")
-        with patch.object(jev, "_fetch", return_value=(envelope(payload, {"reviewer": "z-ai/glm-5.3-prime"}), None)):
+        with patch.object(jev, "_fetch", return_value=(envelope(payload, {"reviewer": "gemini-4-neon"}), None)):
             choice = flow.default_jev(CONFIG, {"request": "Fix the login typo"}, "reviewer")
-        self.assertEqual(choice, {"reviewer": "z-ai/glm-5.3-prime"})
+        self.assertEqual(choice, {"reviewer": "gemini-4-neon"})
 
     def test_an_unreachable_service_is_reported_so_the_defaults_stand_with_a_health_problem(self):
         with patch.object(jev, "_fetch", return_value=(None, "connection_error")):

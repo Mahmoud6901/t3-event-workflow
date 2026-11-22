@@ -13,38 +13,25 @@
     }
   },
   "models": {
-    "claude-haiku-5-5": {
-      "terminalBench": 40.0,
-      "webdev": 1595.4
-    },
     "gpt-6.2-sol": {
       "terminalBench": 61.52,
       "webdev": 1754.0
-    },
-    "claude-sonnet-5-5": {
-      "terminalBench": 63.94,
-      "webdev": 1772.0
     },
     "gpt-6.2-astra": {
       "terminalBench": 62.12,
       "webdev": 1766.2
     },
-    "claude-opus-5-5": {
-      "terminalBench": 65.76,
-      "webdev": 1819.0
-    },
     "gemini-4-neon": {
       "terminalBench": 61.21,
       "webdev": 1764.9
     },
-    "deepseek/deepseek-v4.1-flash-1017": {
-      "terminalBench": 38.48,
-      "webdev": 1658.0
+    "claude-sonnet-5-5": {
+      "terminalBench": 63.94,
+      "webdev": 1772.0
     },
-    "z-ai/glm-5.3-prime": {
-      "terminalBench": 41.21,
-      "webdev": 1622.7,
-      "borrowedFrom": "GLM-5.3"
+    "claude-opus-5-5": {
+      "terminalBench": 65.76,
+      "webdev": 1819.0
     }
   }
 }

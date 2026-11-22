@@ -22,17 +22,13 @@ TERMINAL_BENCH = {"label": "Terminal-Bench 4.1", "url": "https://www.tbench.ai/"
                   "board": {"package": "terminal-bench/terminal-bench", "name": "4-1-0"}}
 WEBDEV = {"label": "LMArena WebDev", "url": "https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset",
           "api": "https://datasets-server.huggingface.co/rows?dataset=lmarena-ai/leaderboard-dataset&config=webdev&split=latest"}
-# Each approved model's name on each board. A board that does not list the model names a stand-in (borrowedFrom):
-# no board lists GLM 5.3 Prime, which OpenRouter calls a faster-serving GLM-5.3.
+# Each approved model's name on each board. For a model no board lists, name a close stand-in and mark it borrowedFrom.
 NAMES = {
-    "claude-haiku-5-5": {"terminalBench": "Haiku 5.5", "webdev": "Claude Haiku 5.5"},
     "gpt-6.2-sol": {"terminalBench": "GPT-6.2 Sol", "webdev": "GPT-6.2 Sol"},
-    "claude-sonnet-5-5": {"terminalBench": "Sonnet 5.5", "webdev": "Claude Sonnet 5.5"},
     "gpt-6.2-astra": {"terminalBench": "GPT-6.2 Astra", "webdev": "GPT-6.2 Astra"},
-    "claude-opus-5-5": {"terminalBench": "Opus 5.5", "webdev": "Claude Opus 5.5"},
     "gemini-4-neon": {"terminalBench": "Gemini 4 Neon", "webdev": "Gemini 4 Neon"},
-    "deepseek/deepseek-v4.1-flash-1017": {"terminalBench": "DeepSeek V4.1 Flash 1017", "webdev": "DeepSeek-V4.1-Flash-20261017"},
-    "z-ai/glm-5.3-prime": {"terminalBench": "GLM-5.3", "webdev": "GLM-5.3", "borrowedFrom": "GLM-5.3"},
+    "claude-sonnet-5-5": {"terminalBench": "Sonnet 5.5", "webdev": "Claude Sonnet 5.5"},
+    "claude-opus-5-5": {"terminalBench": "Opus 5.5", "webdev": "Claude Opus 5.5"},
 }
 
 

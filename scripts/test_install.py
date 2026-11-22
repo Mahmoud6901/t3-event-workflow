@@ -24,8 +24,9 @@ class InstallTests(unittest.TestCase):
         (t3 / "userdata").mkdir(parents=True)
         (t3 / "caches").mkdir()
         (t3 / "userdata" / "settings.json").write_text(json.dumps({"providerInstances": {"acpRegistry_goose": {"driver": "acpRegistry"}}}))
-        listed = [{"slug": m} for m in install.Installer(self.home).goose_models() if m != "z-ai/glm-5.3-prime"]
-        (t3 / "caches" / "acpRegistry_goose.json").write_text(json.dumps({"models": listed}))
+        # An approved OpenRouter model T3 lists, and one it does not, which install adds to goose's custom models.
+        patch.object(install.Installer, "goose_models", return_value=["vendor/listed-model", "vendor/unlisted-model"]).start()
+        (t3 / "caches" / "acpRegistry_goose.json").write_text(json.dumps({"models": [{"slug": "vendor/listed-model"}]}))
         patch.object(install.Installer, "t3_running", return_value=False).start()
         patch.object(install, "STATE", self.home / "workflow" / "state").start()  # Backups land in the temp folder.
         self.addCleanup(patch.stopall)
@@ -156,7 +157,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(text.startswith("# Mine") and "keep me" in text)
         self.assertTrue((self.home / ".codex" / "AGENTS.md").read_text().startswith(install.BEGIN))
         goose = json.loads((self.home / ".t3" / "userdata" / "settings.json").read_text())
-        self.assertEqual(goose["providerInstances"]["acpRegistry_goose"]["config"]["customModels"], ["z-ai/glm-5.3-prime"])
+        self.assertEqual(goose["providerInstances"]["acpRegistry_goose"]["config"]["customModels"], ["vendor/unlisted-model"])
         self.assertTrue(all(ok for _, ok in install.Installer(self.home).status()[:4]))
 
     def test_install_adds_the_codex_hooks_without_a_hooks_file_and_uninstall_creates_none(self):

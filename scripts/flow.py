@@ -33,19 +33,17 @@ MATCHES = 20  # Models one search shows.
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 ROLES = ("implementer", "reviewer", "devops")
 MODELS = {
-    "claude-haiku-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer"]},
     "gpt-6.2-sol": {"provider": "codex", "roles": ["implementer"]},
-    "claude-sonnet-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
     "gpt-6.2-astra": {"provider": "codex", "roles": ["implementer"]},
-    "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
     "gemini-4-neon": {"provider": ANTIGRAVITY, "roles": ["implementer", "reviewer", "devops"]},
-    # OpenRouter models run through T3's goose provider instance. None of these declares thinking_effort in T3.
-    "deepseek/deepseek-v4.1-flash-1017": {"provider": GOOSE, "roles": ["implementer", "reviewer"]},
-    "z-ai/glm-5.3-prime": {"provider": GOOSE, "roles": ["implementer", "reviewer", "devops"]},
+    "claude-sonnet-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
+    "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
 }  # Jev weighs each by its public coding scores: assets/scores.json, refreshed by scores.py.
 RETIRED = {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "deepseek/deepseek-v4.1-flash", "google/gemini-4-argon",
            "qwen/qwen3.8-flash", "moonshotai/kimi-k3.1-pro",
-           "google/gemini-4-neon"}  # Gone from every project's list, even one bound with them. Neon runs on Antigravity.
+           "google/gemini-4-neon",  # Neon runs on Antigravity.
+           "claude-haiku-5-5", "deepseek/deepseek-v4.1-flash-1017",
+           "z-ai/glm-5.3-prime"}  # Gone from every project's list, even one bound with them.
 DEFAULTS = {"implementer": "gpt-6.2-sol", "implementerEffort": "xhigh", "reviewer": "claude-opus-5-5",
             "reviewerEffort": "xhigh", "devops": "claude-sonnet-5-5", "devopsEffort": "high"}
 QUIET_MINUTES = 30
