@@ -1,4 +1,4 @@
-"""Jev's advice for one new worker of the delegated PR workflow: its model, and for an implementer its effort.
+"""Jev's advice for one new worker of the delegated PR workflow: its model. Jev sets no effort.
 
 The harness owns the workflow and its defaults. This module only builds one request, validates one response and keeps
 the valid choices; anything missing or invalid is left to the harness (flow.default_jev): an implementer's model to the
@@ -23,11 +23,8 @@ DEFAULT_KEY_FILE = "secrets/typesafe-api-key.txt"
 MAX_RESPONSE_BYTES = 256_000
 TIMEOUT_SECONDS = 20
 ROLES = ("implementer", "reviewer", "devops")
-EFFORT_ROLES = ("implementer",)  # Jev sets no other role's effort.
 PROVIDER_LABELS = {"codex": "OpenAI via Codex", "claudeAgent": "Anthropic via Claude", "acpRegistry_goose": "OpenRouter via goose",
                    "antigravity": "Google via Antigravity"}
-EFFORT_OPTIONS = {"low": "Quick.", "medium": "Balanced.", "high": "Thorough.",
-                  "xhigh": "Very thorough.", "max": "Most thorough and slowest."}
 SCORES_FILE = Path(__file__).resolve().parent.parent / "assets" / "scores.json"  # Refreshed by scores.py.
 USE_WINDOWS_CURL = os.name == "nt"
 
@@ -107,13 +104,6 @@ def build_request(config, context, purpose="task", role="implementer"):
         "uncertain, and report your confidence honestly.",
         options,
     )
-    if role in EFFORT_ROLES:
-        questions[role + "Effort"] = _choice(
-            f"Choose the lowest reasoning effort at which the {role} still gets this task right the first time: more for "
-            "difficult, risky or large work, less for small, well-specified work. Choose even when uncertain, and report "
-            "your confidence honestly.",
-            EFFORT_OPTIONS,
-        )
     return {"model": config.get("jev", {}).get("model"), "state": {"purpose": purpose, "context": context},
             "questions": questions}
 
@@ -275,13 +265,13 @@ def _answer(envelope, key, expected_options):
 
 
 def evaluate(config, context, purpose="task", response=None, role="implementer"):
-    """Jev's valid choices for one role of one task: {"status", "source", "selectedModels", "selectedEfforts", ...}. A
+    """Jev's valid choice for one role of one task: {"status", "source", "selectedModels", ...}. A
     failed request or an invalid response gives status "unavailable" with a reason and no choices.
 
     Supplying ``response`` skips networking and marks the result as a simulation (tests and previews).
     """
     source = "simulation" if response is not None else "jev"
-    empty = {"purpose": purpose, "source": source, "selectedModels": {}, "selectedEfforts": {}}
+    empty = {"purpose": purpose, "source": source, "selectedModels": {}}
     try:
         payload = build_request(config, context, purpose, role)
     except ValueError:
@@ -295,8 +285,7 @@ def evaluate(config, context, purpose="task", response=None, role="implementer")
     # No confidence threshold: every valid answer applies; a missing or invalid one is left to the harness.
     parsed = {key: _answer(response, key, question["criteria"]) for key, question in payload["questions"].items()}
     models = {role: parsed[role][0]} if parsed[role][0] is not None else {}
-    efforts = {role: parsed[role + "Effort"][0]} if parsed.get(role + "Effort", (None,))[0] is not None else {}
-    return {"status": "decided", **empty, "selectedModels": models, "selectedEfforts": efforts,
+    return {"status": "decided", **empty, "selectedModels": models,
             "confidence": {key: answer[1] for key, answer in parsed.items()},
             "jevModel": config.get("jev", {}).get("model"), "jevUsage": response.get("usage"),
             "transport": response.get("_harnessTransport", {})}

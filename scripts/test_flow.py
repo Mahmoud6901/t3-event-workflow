@@ -190,7 +190,8 @@ class FlowTests(unittest.TestCase):
         return harness.run(["--db", str(self.db)], json.dumps(request), hub=lambda repo: self.hub, jev=self.advise)
 
     def advise(self, config, context, role):
-        """Jev, as flow.default_jev answers: the role's model, and an implementer's effort."""
+        """Jev, as flow.default_jev answers: the role's model. An implementer's effort in jev_answer stands for one an
+        older version's answer kept in a task's choice, which no worker may run at."""
         self.jev_asked = getattr(self, "jev_asked", 0) + 1
         self.jev_roles = [*getattr(self, "jev_roles", []), role]
         self.jev_models = sorted(config["models"])
@@ -206,7 +207,7 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assertTrue(self.orchestrator("control", action="activate", authorization="Activate the workflow.")["ok"])
 
-    def test_a_queued_task_starts_its_implementer_in_its_own_worktree_on_jevs_model(self):
+    def test_a_queued_task_starts_its_implementer_in_its_own_worktree_on_jevs_model_at_xhigh(self):
         self.bind()
         queued = self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [
             {"task": "Fix the login typo", "brief": "Rename nmae to name in src/login.ts."}]}])
@@ -218,7 +219,8 @@ class FlowTests(unittest.TestCase):
         arguments = call["arguments"]
         self.assertEqual((arguments["isolation"], arguments["role"], arguments["mode"]), ("worktree", "implementation", "async"))
         self.assertEqual(arguments["target"], {"providerInstanceId": "codex", "model": "gpt-6.2-astra",
-                                               "options": {"reasoningEffort": "medium", "serviceTier": "default"}})
+                                               "options": {"reasoningEffort": "xhigh", "serviceTier": "default"}},
+                         "an effort in Jev's answer, as a task stored before 0.8.1 keeps, is not used")
         self.assertEqual(arguments["clientRequestId"], call["call"])
         self.assertIn("Rename nmae to name in src/login.ts.", arguments["task"])
         self.assertIn("worker pr --worker", arguments["task"])
@@ -311,12 +313,12 @@ class FlowTests(unittest.TestCase):
         self.start()
         self.assertNotIn("gemini-4-neon", self.jev_models)
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        self.jev_answer = {**self.jev_answer, "implementer": "gemini-4-neon", "implementerEffort": "high"}
+        self.jev_answer = {"implementer": "gemini-4-neon"}
         self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
         (call,) = self.start()
         self.assertIn("gemini-4-neon", self.jev_models)
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
-                                                       "options": {"thought_level": "high"}})
+                                                       "options": {"thought_level": "xhigh"}})
 
     def test_a_retired_model_leaves_a_bound_projects_list_and_an_older_bindings_defaults_give_way(self):
         retired = ("gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra")
@@ -337,8 +339,8 @@ class FlowTests(unittest.TestCase):
     def test_gemini_4_neon_runs_through_antigravity_in_its_effort_terms_and_no_longer_through_goose(self):
         goose_neon = {"slug": "google/gemini-4-neon", "capabilities": {"optionDescriptors": [{"id": "provider"}]}}
         self.t3_caches(goose=GOOSE_LIST + [goose_neon], antigravity=ANTIGRAVITY_LIST)
-        self.jev_answer = {**self.jev_answer, "implementer": "gemini-4-neon", "implementerEffort": "max"}
-        self.bind()
+        self.jev_answer = {"implementer": "gemini-4-neon"}
+        self.bind(picks={"implementer": {"effort": "max"}})
         self.queue("Fix the login typo")
         (call,) = self.start()
         self.assertIn("gemini-4-neon", self.jev_models)
@@ -417,14 +419,14 @@ class FlowTests(unittest.TestCase):
         self.queue("Fix the login typo")
         (call,) = self.start()
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
-                                                       "options": {"thought_level": "medium"}})
+                                                       "options": {"thought_level": "xhigh"}})
         self.assertFalse([m for m in self.jev_models if m.startswith("gpt-")], "no Codex model has capacity")
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
         self.assertTrue(self.orchestrator("restart", task="Fix the login typo", authorization="Restart it.")["ok"])
         fresh = [c for c in self.start() if c["tool"] == "delegate_task"]
         self.assertEqual([c["arguments"]["target"]["model"] for c in fresh], ["gpt-6.2-astra"])
 
-    def test_a_stand_in_takes_jevs_effort_when_the_users_is_a_level_only_their_own_model_has(self):
+    def test_a_stand_in_runs_at_xhigh_when_the_users_effort_is_a_level_only_their_own_model_has(self):
         spent = {"codex": [{"id": "primary", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]}
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
         self.bind(picks={"implementer": {"model": "gpt-6.2-astra", "effort": "ultra"}})
@@ -433,7 +435,7 @@ class FlowTests(unittest.TestCase):
         self.queue("Fix the login typo")
         (call,) = self.start()
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
-                                                       "options": {"thought_level": "medium"}})
+                                                       "options": {"thought_level": "xhigh"}})
 
     def test_a_task_restarted_after_the_limit_reset_is_advised_afresh_and_leaves_its_stand_in(self):
         spent = {"codex": [{"id": "primary", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]}
@@ -480,7 +482,7 @@ class FlowTests(unittest.TestCase):
         self.assertIn("claude-sonnet-5-5 is at its usage limit, so a new DevOps runs on gemini-4-neon until it resets.",
                       self.last_step["tell"])
 
-    def test_an_effort_set_alone_wins_over_jevs_and_jev_still_picks_the_model(self):
+    def test_an_effort_the_user_sets_alone_holds_and_jev_still_picks_the_model(self):
         self.jev_answer["implementer"] = "gpt-6.2-sol"
         self.bind(picks={"implementer": {"effort": "max"}})
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])

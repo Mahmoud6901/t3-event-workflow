@@ -278,8 +278,8 @@ def update_fix(config, outcome, number):
 
 def role_model(config, state, role):
     """What a new worker in this role starts on: the user's model and effort where set, else the defaults. An
-    implementer's model the user left open is Jev's, chosen per task ("jev"), and Jev may set its effort; Jev also
-    stands in for any role's model that is at its usage limit."""
+    implementer's model the user left open is Jev's, chosen per task ("jev"); Jev also stands in for any role's model
+    that is at its usage limit. Jev sets no effort."""
     pick = (state.get("picks") or {}).get(role) or {}
     model = pick.get("model") or config["defaults"].get(role)
     return {"model": model, "modelSource": "pick" if pick.get("model") else "default" if model else "jev",
@@ -325,12 +325,12 @@ def settle_pick(role, current, raw, defaults, lists):
 
 
 def default_jev(config, context, role="implementer"):
-    """Jev's valid model for one role of one task, and an implementer's effort; add_worker fills in what it leaves out.
-    Raises when Jev gives no answer, so the caller records the problem and the worker starts without advice."""
+    """Jev's valid model for one role of one task, {} when its answer was invalid; add_worker fills in what it leaves
+    out. Raises when Jev gives no answer, so the caller records the problem and the worker starts without advice."""
     decision = jev.evaluate(config, context, "task", role=role)
     if decision["status"] != "decided":
         raise RuntimeError(f"Jev gave no advice: {decision['reason']}")
-    return {**decision["selectedModels"], **{r + "Effort": e for r, e in decision["selectedEfforts"].items()}}
+    return dict(decision["selectedModels"])
 
 
 def new_state():
@@ -1004,9 +1004,10 @@ class Flow:
         task["rev"] += 1
 
     def add_worker(self, config, state, role, plan, task_id, choice=None):
-        """Model and effort each come from the user's setting for the role; else Jev's advice (it names an approved
-        model); else the default. An implementer has no default model: without Jev's answer it starts on the approved
-        one with the best scores that T3 runs. Advice marked "limit" stands in for a model at its usage limit, the
+        """The model comes from the user's setting for the role; else Jev's advice (it names an approved model); else
+        the default. An implementer has no default model: without Jev's answer it starts on the approved one with the
+        best scores that T3 runs. The effort is the user's, else the default: Jev sets none, and an effort a task's
+        choice kept from an older version is not used. Advice marked "limit" stands in for a model at its usage limit, the
         user's own included. The worker keeps its model entry, so a later change never reaches a worker already started."""
         pick = (state.get("picks") or {}).get(role) or {}
         choice = choice or {}
@@ -1017,13 +1018,12 @@ class Flow:
         if not model and not pick.get("model") and role not in config["defaults"]:
             lists = t3_lists()[0]
             model, source = best_scored(config, role, lists, t3_limits()) or best_scored(config, role, None), "scores"
-        effort = choice.get(role + "Effort") if choice.get(role + "Effort") in EFFORTS else None
         chosen = pick.get("effort")
         if model and stand_in and chosen not in EFFORTS:
             chosen = None  # A level only the user's own model has does not carry to its stand-in.
         worker = {"id": next_id(state, "w"), "token": secrets.token_hex(16), "role": role, "plan": plan, "task": task_id,
                   "model": model or config["defaults"].get(role),
-                  "effort": chosen or effort or config["defaults"][role + "Effort"],
+                  "effort": chosen or config["defaults"][role + "Effort"],
                   "modelSource": source, "childThreadId": None,
                   "taskIds": [], "state": "prepared", "job": None, "path": None}
         if pick.get("model") and not model:
@@ -1039,7 +1039,7 @@ class Flow:
 
     def advise(self, config, state, role, context, lists, spent):
         """Jev's advice for one new worker, {} without any. Jev chooses an implementer's model where the user left it
-        open, and its effort. A model the user picked, and a reviewer's or DevOps's, it replaces only while that model is
+        open. A model the user picked, and a reviewer's or DevOps's, it replaces only while that model is
         at its usage limit: then with an approved model of a provider that has capacity, marked "limit". A choice made
         while a limit kept out an approved model T3 runs is marked "narrowed", so a restart after the reset asks again."""
         model, provider = usual(config, state, role)

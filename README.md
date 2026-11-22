@@ -23,10 +23,11 @@ Implementers have no default model: Jev chooses one for each task. You can choos
 its effort, or both, at setup or later: any model your T3 runs, at any effort T3 offers for it. Setup
 checks which models your T3 can run, and asks you to pick one for any role it cannot start.
 
-With a Jev key, Jev chooses the model and effort of each task's implementer where you left them open,
-seeing each approved model's [LiveBench 2.0](https://livebench.ai/) scores, from tasks the board does
-not publish. Without Jev's answer (no key, Jev unreachable, or an invalid reply), the implementer runs
-on the approved model with the best average score that T3 runs, at your effort or `xhigh`. Reviewers and DevOps run
+With a Jev key, Jev chooses the model of each task's implementer where you left it open, seeing each
+approved model's [LiveBench 2.0](https://livebench.ai/) scores, from tasks the board does not
+publish. Without Jev's answer (no key, Jev unreachable, or an invalid reply), the implementer runs on
+the approved model with the best average score that T3 runs. Jev never sets an effort: an
+implementer runs at `xhigh` unless you choose another. Reviewers and DevOps run
 on your choice or the default. One exception: while T3 shows a model's usage limit as spent, Jev
 starts that role's new workers on an approved model of another provider, and they go back to your
 model when the limit resets.
