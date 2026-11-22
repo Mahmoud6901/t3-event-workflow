@@ -15,7 +15,7 @@ Website: [mahmoud6901.github.io/t3-event-workflow](https://mahmoud6901.github.io
 ## Install (Windows, macOS, Linux)
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/) (or pipx), Git, the GitHub CLI (`gh`,
-signed in), and T3 Code with at least one of Claude, Codex or goose (for OpenRouter) signed in. The
+signed in), and T3 Code with at least one of Claude, Codex, goose (for OpenRouter) or Antigravity signed in. The
 orchestrator runs on Claude Code (`claude`) or Codex (`codex`), so one of them must be on PATH.
 
 The default models are GPT-6.2-Sol (Codex) for implementers and Opus 5.5 for reviewers, each at
@@ -23,7 +23,8 @@ The default models are GPT-6.2-Sol (Codex) for implementers and Opus 5.5 for rev
 both, at setup or later: any model your T3 runs, at any effort T3 offers for it. Setup checks which
 models your T3 can run, and asks you to pick one for any role whose default it cannot run.
 
-With a Jev key, Jev chooses the model and effort of each task's implementer where you left them open.
+With a Jev key, Jev chooses the model and effort of each task's implementer where you left them open,
+seeing each approved model's public coding scores from Terminal-Bench 4.1 and LMArena WebDev.
 Reviewers and DevOps run on your choice or the default. One exception: while T3 shows a model's usage
 limit as spent, Jev starts that role's new workers on an approved model of another provider, and they
 go back to your model when the limit resets.
@@ -97,7 +98,7 @@ project, in every turn:
 - they read only the workflow's published code, and never change it.
 
 Shell commands are judged by the paths they name. That stops mistakes and plain attempts, not a
-determined program. Goose workers run no hooks, and every session still runs as you: only separate user
+determined program. Goose and Antigravity workers run no hooks, and every session still runs as you: only separate user
 accounts would be a hard wall.
 
 After `uv tool upgrade t3-event-workflow`, run `t3-workflow upgrade`. It moves each binding an older

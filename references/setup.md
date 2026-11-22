@@ -37,7 +37,7 @@ step 1:
 - If `known` is false, tell the user its `reason` and go on: every role keeps its default model, and
   only efforts can be chosen.
 - Otherwise tell the user which `providers` T3 can run, and why any other cannot. If none is ready,
-  stop: T3 needs Claude, Codex or goose enabled and signed in.
+  stop: T3 needs Claude, Codex, goose or Antigravity enabled and signed in.
 - Then, for the implementer, the reviewer and DevOps in turn, show the role's default model and
   effort from `defaults`, and ask for a model, an effort, both, or a skip. When its `runs` is false,
   this T3 cannot run the default, so the user picks a model; `init` refuses that role without one.

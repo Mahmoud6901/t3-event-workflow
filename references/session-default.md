@@ -20,7 +20,7 @@ When it applies, find your place below:
   [setup.md](setup.md). Only projects hosted on GitHub use the workflow.
 - **Another thread is the project's orchestrator:** the harness refuses you with "Only the bound
   orchestrator runs workflow operations". Point the user to that thread, and set up nothing.
-- **You are a goose session:** you cannot be the orchestrator, because its hooks run only in Claude
+- **You are a goose or Antigravity session:** you cannot be the orchestrator, because its hooks run only in Claude
   Code and Codex. Tell the user to use a Claude or Codex session for it.
 
 In the orchestrator's turns, the workflow is the process. Generic process skills (brainstorming,

@@ -31,7 +31,6 @@
   "models": {
     "claude-haiku-5-5": {
       "provider": "claudeAgent",
-      "tier": 1,
       "roles": [
         "implementer",
         "reviewer"
@@ -39,14 +38,12 @@
     },
     "gpt-6.2-sol": {
       "provider": "codex",
-      "tier": 2,
       "roles": [
         "implementer"
       ]
     },
     "claude-sonnet-5-5": {
       "provider": "claudeAgent",
-      "tier": 2,
       "roles": [
         "reviewer",
         "devops"
@@ -54,22 +51,27 @@
     },
     "gpt-6.2-astra": {
       "provider": "codex",
-      "tier": 3,
       "roles": [
         "implementer"
       ]
     },
     "claude-opus-5-5": {
       "provider": "claudeAgent",
-      "tier": 3,
       "roles": [
+        "reviewer",
+        "devops"
+      ]
+    },
+    "gemini-4-neon": {
+      "provider": "antigravity",
+      "roles": [
+        "implementer",
         "reviewer",
         "devops"
       ]
     },
     "deepseek/deepseek-v4.1-flash-1017": {
       "provider": "acpRegistry_goose",
-      "tier": 1,
       "roles": [
         "implementer",
         "reviewer"
@@ -77,16 +79,6 @@
     },
     "z-ai/glm-5.3-prime": {
       "provider": "acpRegistry_goose",
-      "tier": 2,
-      "roles": [
-        "implementer",
-        "reviewer",
-        "devops"
-      ]
-    },
-    "google/gemini-4-neon": {
-      "provider": "acpRegistry_goose",
-      "tier": 2,
       "roles": [
         "implementer",
         "reviewer",

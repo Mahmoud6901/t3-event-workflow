@@ -26,23 +26,26 @@ ROOT = SCRIPTS.parent
 DEFAULT_DB = places.STATE / "harness.sqlite3"
 GOOSE = "acpRegistry_goose"
 T3_CACHES = places.T3_HOME / "caches"  # T3's list of what each provider can run, one file per provider.
-PROVIDERS = {"claudeAgent": ("Claude", "effort"), "codex": ("Codex", "reasoningEffort"), GOOSE: ("goose", "thinking_effort")}
+ANTIGRAVITY = "antigravity"  # Google's agent; T3 also lists Claude models under it, so it comes last here.
+PROVIDERS = {"claudeAgent": ("Claude", "effort"), "codex": ("Codex", "reasoningEffort"), GOOSE: ("goose", "thinking_effort"),
+             ANTIGRAVITY: ("Antigravity", "thought_level")}
 MATCHES = 20  # Models one search shows.
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 ROLES = ("implementer", "reviewer", "devops")
 MODELS = {
-    "claude-haiku-5-5": {"provider": "claudeAgent", "tier": 1, "roles": ["implementer", "reviewer"]},
-    "gpt-6.2-sol": {"provider": "codex", "tier": 2, "roles": ["implementer"]},
-    "claude-sonnet-5-5": {"provider": "claudeAgent", "tier": 2, "roles": ["reviewer", "devops"]},
-    "gpt-6.2-astra": {"provider": "codex", "tier": 3, "roles": ["implementer"]},
-    "claude-opus-5-5": {"provider": "claudeAgent", "tier": 3, "roles": ["reviewer", "devops"]},
+    "claude-haiku-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer"]},
+    "gpt-6.2-sol": {"provider": "codex", "roles": ["implementer"]},
+    "claude-sonnet-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
+    "gpt-6.2-astra": {"provider": "codex", "roles": ["implementer"]},
+    "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
+    "gemini-4-neon": {"provider": ANTIGRAVITY, "roles": ["implementer", "reviewer", "devops"]},
     # OpenRouter models run through T3's goose provider instance. None of these declares thinking_effort in T3.
-    "deepseek/deepseek-v4.1-flash-1017": {"provider": GOOSE, "tier": 1, "roles": ["implementer", "reviewer"]},
-    "z-ai/glm-5.3-prime": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer", "devops"]},
-    "google/gemini-4-neon": {"provider": GOOSE, "tier": 2, "roles": ["implementer", "reviewer", "devops"]},
-}
+    "deepseek/deepseek-v4.1-flash-1017": {"provider": GOOSE, "roles": ["implementer", "reviewer"]},
+    "z-ai/glm-5.3-prime": {"provider": GOOSE, "roles": ["implementer", "reviewer", "devops"]},
+}  # Jev weighs each by its public coding scores: assets/scores.json, refreshed by scores.py.
 RETIRED = {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "deepseek/deepseek-v4.1-flash", "google/gemini-4-argon",
-           "qwen/qwen3.8-flash", "moonshotai/kimi-k3.1-pro"}  # Gone from every project's list, even one bound with them.
+           "qwen/qwen3.8-flash", "moonshotai/kimi-k3.1-pro",
+           "google/gemini-4-neon"}  # Gone from every project's list, even one bound with them. Neon runs on Antigravity.
 DEFAULTS = {"implementer": "gpt-6.2-sol", "implementerEffort": "xhigh", "reviewer": "claude-opus-5-5",
             "reviewerEffort": "xhigh", "devops": "claude-sonnet-5-5", "devopsEffort": "high"}
 QUIET_MINUTES = 30
@@ -89,7 +92,8 @@ def selection(config, model_id, effort, item=None):
     `thinking_effort` only when it declares one (its entry says "thinking": true), and that option has no xhigh."""
     item = item or config["models"][model_id]
     options = {"claudeAgent": {"effort": effort},
-               GOOSE: {"provider": "openrouter"}}.get(
+               GOOSE: {"provider": "openrouter"},
+               ANTIGRAVITY: {"thought_level": sent(ANTIGRAVITY, effort)}}.get(
         item["provider"], {"reasoningEffort": effort, "serviceTier": "default"})
     if item["provider"] == GOOSE and item.get("thinking"):
         options["thinking_effort"] = sent(GOOSE, effort)
@@ -97,8 +101,9 @@ def selection(config, model_id, effort, item=None):
 
 
 def sent(provider, effort):
-    """The effort as the provider takes it: goose's thinking_effort has no xhigh, so xhigh goes as high."""
-    return "high" if provider == GOOSE and effort == "xhigh" else effort
+    """The effort as the provider takes it: goose's thinking_effort has no xhigh, so xhigh goes as high, and
+    Antigravity's thought_level has no max, so max goes as xhigh."""
+    return {(GOOSE, "xhigh"): "high", (ANTIGRAVITY, "max"): "xhigh"}.get((provider, effort), effort)
 
 
 def validate_config(raw):
@@ -117,7 +122,7 @@ def validate_config(raw):
     config.setdefault("models", copy.deepcopy(MODELS))
     config["defaults"] = {**DEFAULTS, **(config.get("defaults") or {})}
     for model_id, item in config["models"].items():
-        require(item.get("provider") in {"codex", "claudeAgent", GOOSE}, f"{model_id}: provider is codex, claudeAgent or goose")
+        require(item.get("provider") in PROVIDERS, f"{model_id}: provider is one of {', '.join(PROVIDERS)}")
         require(set(item.get("roles") or []) <= set(ROLES), f"{model_id}: roles are implementer, reviewer and devops")
     for role in ROLES:
         model = config["defaults"][role]

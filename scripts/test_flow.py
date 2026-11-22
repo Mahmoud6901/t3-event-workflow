@@ -28,6 +28,13 @@ GOOSE_LIST = [
                                             {"id": "thinking_effort", "options": levels("off", "low", "medium", "high", "max")}]}},
     {"slug": "qwen/qwen3.8-max", "name": "qwen/qwen3.8-max", "capabilities": {"optionDescriptors": [{"id": "provider"}]}},
 ]
+# T3's Antigravity list (2026-11-22): its effort option is `thought_level`, and it also lists Claude models.
+ANTIGRAVITY_LIST = [
+    {"slug": "gemini-4-neon", "name": "Gemini 4 Neon", "capabilities": {"optionDescriptors": [
+        {"id": "thought_level", "options": levels("low", "medium", "high", "xhigh")}]}},
+    {"slug": "claude-opus-5-5", "name": "Claude Opus 5.5", "capabilities": {"optionDescriptors": [
+        {"id": "thought_level", "options": levels("low", "medium", "high")}]}},
+]
 CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultrathink"]
 CLAUDE_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [{"id": "effort", "options": levels(*CLAUDE_EFFORTS)}]}}
                for s in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")]
@@ -35,9 +42,9 @@ CODEX_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [
     {"id": "reasoningEffort", "options": levels("low", "medium", "high", "xhigh", "max", "ultra")}]}}
               for s in ("gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra")]
 
-# The approved OpenRouter models that stand in for a role whose own model is at its usage limit.
-STAND_INS = GOOSE_LIST + [{"slug": s, "name": s, "capabilities": {"optionDescriptors": [{"id": "provider"}, {"id": "mode"}]}}
-                          for s in ("z-ai/glm-5.3-prime", "google/gemini-4-neon")]
+# An approved OpenRouter model that stands in for a role whose own model is at its usage limit.
+STAND_INS = GOOSE_LIST + [{"slug": "z-ai/glm-5.3-prime", "name": "z-ai/glm-5.3-prime",
+                           "capabilities": {"optionDescriptors": [{"id": "provider"}, {"id": "mode"}]}}]
 SPENT = [{"id": "five_hour", "kind": "session", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]
 
 ORCH = "thread-orch"
@@ -210,11 +217,12 @@ class FlowTests(unittest.TestCase):
         self.assertEqual([c["call"] for c in again["calls"]], [call["call"]])
         self.assertEqual(again["calls"][0]["arguments"]["clientRequestId"], call["call"])
 
-    def t3_caches(self, goose=GOOSE_LIST, claude=CLAUDE_LIST, codex=CODEX_LIST, usage=None, **goose_top):
+    def t3_caches(self, goose=GOOSE_LIST, claude=CLAUDE_LIST, codex=CODEX_LIST, antigravity=None, usage=None, **goose_top):
         """T3's provider caches as T3 writes them; None leaves that provider's out, as when it is not installed. `usage`
         gives a provider's usage windows, as T3 shows its limits."""
         self.caches.mkdir(exist_ok=True)
-        for provider, models, top in (("claudeAgent", claude, {}), ("codex", codex, {}), ("acpRegistry_goose", goose, goose_top)):
+        for provider, models, top in (("claudeAgent", claude, {}), ("codex", codex, {}), ("acpRegistry_goose", goose, goose_top),
+                                      ("antigravity", antigravity, {})):
             path = self.caches / f"{provider}.json"
             if models is None:
                 path.unlink(missing_ok=True)
@@ -224,7 +232,7 @@ class FlowTests(unittest.TestCase):
                                         "auth": {"status": "authenticated"}, "models": models, **limits, **top}))
 
     def test_setup_searches_every_model_t3_can_run_by_name_before_the_project_is_bound(self):
-        self.t3_caches()
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
         found = self.orchestrator("models", search="QWEN")
         self.assertTrue(found["ok"], found)
         self.assertEqual(found["models"], [{"model": "qwen/qwen3.8-flash", "provider": "goose", "efforts": []},
@@ -232,7 +240,7 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.orchestrator("models", search="sonnet")["models"],
                          [{"model": "claude-sonnet-5-5", "provider": "Claude", "efforts": CLAUDE_EFFORTS},
                           {"model": "anthropic/claude-sonnet-4", "provider": "goose", "efforts": ["low", "medium", "high", "max"]}])
-        self.assertEqual(found["providers"], {"Claude": "ready", "Codex": "ready", "goose": "ready"})
+        self.assertEqual(found["providers"], {"Claude": "ready", "Codex": "ready", "goose": "ready", "Antigravity": "ready"})
 
     def test_setup_is_told_why_a_provider_cannot_run_and_without_t3_nothing_is_checked(self):
         self.assertFalse(self.orchestrator("models")["known"])
@@ -270,18 +278,18 @@ class FlowTests(unittest.TestCase):
         self.assertFalse([m for m in self.jev_models if "/" in m], self.jev_models)
 
     def test_a_model_approved_after_a_project_was_bound_reaches_jev_once_t3_lists_it(self):
-        self.t3_caches()  # T3's OpenRouter list has no Gemini 4 Neon yet, so the binding leaves it out.
+        self.t3_caches()  # T3's OpenRouter list has no GLM 5.3 Prime yet, so the binding leaves it out.
         self.bind()
         self.queue("Fix the login typo")
         self.start()
-        self.assertNotIn("google/gemini-4-neon", self.jev_models)
-        self.t3_caches(goose=GOOSE_LIST + [{"slug": "google/gemini-4-neon", "name": "Gemini 4 Neon",
+        self.assertNotIn("z-ai/glm-5.3-prime", self.jev_models)
+        self.t3_caches(goose=GOOSE_LIST + [{"slug": "z-ai/glm-5.3-prime", "name": "GLM 5.3 Prime",
                                             "capabilities": {"optionDescriptors": [{"id": "provider"}]}}])
-        self.jev_answer = {**self.jev_answer, "implementer": "google/gemini-4-neon", "implementerEffort": "high"}
+        self.jev_answer = {**self.jev_answer, "implementer": "z-ai/glm-5.3-prime", "implementerEffort": "high"}
         self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
         (call,) = self.start()
-        self.assertIn("google/gemini-4-neon", self.jev_models)
-        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose", "model": "google/gemini-4-neon",
+        self.assertIn("z-ai/glm-5.3-prime", self.jev_models)
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose", "model": "z-ai/glm-5.3-prime",
                                                        "options": {"provider": "openrouter"}})
 
     def test_a_retired_model_leaves_a_bound_projects_list_and_its_retired_default_moves_to_the_current_one(self):
@@ -296,6 +304,25 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-sol")
         self.assertIn("gpt-6.2-astra", self.jev_models)
         self.assertFalse(set(retired) & set(self.jev_models), self.jev_models)
+
+    def test_gemini_4_neon_runs_through_antigravity_in_its_effort_terms_and_no_longer_through_goose(self):
+        goose_neon = {"slug": "google/gemini-4-neon", "capabilities": {"optionDescriptors": [{"id": "provider"}]}}
+        self.t3_caches(goose=GOOSE_LIST + [goose_neon], antigravity=ANTIGRAVITY_LIST)
+        self.jev_answer = {**self.jev_answer, "implementer": "gemini-4-neon", "implementerEffort": "max"}
+        self.bind()
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertIn("gemini-4-neon", self.jev_models)
+        self.assertNotIn("google/gemini-4-neon", self.jev_models)
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
+                                                       "options": {"thought_level": "xhigh"}}, "it has no max, so max goes as xhigh")
+
+    def test_a_model_both_claude_and_antigravity_list_is_picked_through_claude(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
+        self.bind(picks={"implementer": "claude-opus-5-5"})
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"]["providerInstanceId"], "claudeAgent")
 
     def test_a_role_picked_at_setup_runs_on_that_model_whatever_jev_advises(self):
         self.t3_caches()
@@ -315,7 +342,7 @@ class FlowTests(unittest.TestCase):
 
     def test_jev_is_asked_about_the_implementer_alone_so_the_reviewer_and_devops_run_on_their_own_models(self):
         self.t3_caches(goose=STAND_INS)
-        self.jev_answer.update(reviewer="claude-haiku-5-5", devops="google/gemini-4-neon")
+        self.jev_answer.update(reviewer="claude-haiku-5-5", devops="gemini-4-neon")
         _, review, tree = self.to_review()
         self.assertEqual(review["arguments"]["target"]["model"], "claude-opus-5-5")
         head = git(tree, "rev-parse", "HEAD")
@@ -395,14 +422,15 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.jev_roles, ["implementer", "implementer"])
 
     def test_a_restart_during_a_limit_starts_the_new_worker_on_a_stand_in(self):
-        self.t3_caches(goose=STAND_INS)
+        self.t3_caches(goose=STAND_INS, antigravity=ANTIGRAVITY_LIST)
         _, review, _ = self.to_review()
         self.assertEqual(review["arguments"]["target"]["model"], "claude-opus-5-5")
-        self.t3_caches(goose=STAND_INS, usage={"claudeAgent": SPENT})
-        self.jev_answer["reviewer"] = "google/gemini-4-neon"
+        self.t3_caches(goose=STAND_INS, antigravity=ANTIGRAVITY_LIST, usage={"claudeAgent": SPENT})
+        self.jev_answer["reviewer"] = "gemini-4-neon"
         self.assertTrue(self.orchestrator("restart", task="Fix the login typo", authorization="It is stuck at its limit.")["ok"])
         fresh = [c for c in self.start() if c["tool"] == "delegate_task"]
-        self.assertEqual([c["arguments"]["target"]["model"] for c in fresh], ["google/gemini-4-neon"])
+        self.assertEqual([c["arguments"]["target"] for c in fresh], [{"providerInstanceId": "antigravity", "model": "gemini-4-neon",
+                                                                     "options": {"thought_level": "xhigh"}}])
 
     def test_with_no_other_provider_to_run_on_the_worker_keeps_its_model_and_jev_is_not_asked(self):
         self.t3_caches(goose=None, usage={"claudeAgent": SPENT})
@@ -411,16 +439,16 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.jev_roles, ["implementer"])
 
     def test_devops_at_its_usage_limit_runs_on_a_stand_in(self):
-        self.t3_caches(goose=STAND_INS)
+        self.t3_caches(goose=STAND_INS, antigravity=ANTIGRAVITY_LIST)
         _, review, tree = self.to_review()
         head = git(tree, "rev-parse", "HEAD")
         self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve", "--sha", head)["ok"])
-        self.t3_caches(goose=STAND_INS, usage={"claudeAgent": SPENT})
-        self.jev_answer["devops"] = "google/gemini-4-neon"
+        self.t3_caches(goose=STAND_INS, antigravity=ANTIGRAVITY_LIST, usage={"claudeAgent": SPENT})
+        self.jev_answer["devops"] = "gemini-4-neon"
         (devops,) = self.start()
-        self.assertEqual(devops["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose",
-                                                         "model": "google/gemini-4-neon", "options": {"provider": "openrouter"}})
-        self.assertIn("claude-sonnet-5-5 is at its usage limit, so a new DevOps runs on google/gemini-4-neon until it resets.",
+        self.assertEqual(devops["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
+                                                         "options": {"thought_level": "high"}})
+        self.assertIn("claude-sonnet-5-5 is at its usage limit, so a new DevOps runs on gemini-4-neon until it resets.",
                       self.last_step["tell"])
 
     def test_an_effort_set_alone_wins_over_jevs_and_jev_still_picks_the_model(self):

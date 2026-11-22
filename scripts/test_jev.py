@@ -31,13 +31,26 @@ class TaskAdviceTests(unittest.TestCase):
         devops = jev.build_request(CONFIG, {}, "task", "devops")["questions"]
         self.assertEqual(set(devops), {"devops"})
         self.assertEqual(set(devops["devops"]["criteria"]),
-                         {"claude-sonnet-5-5", "claude-opus-5-5", "z-ai/glm-5.3-prime", "google/gemini-4-neon"})
+                         {"claude-sonnet-5-5", "claude-opus-5-5", "z-ai/glm-5.3-prime", "gemini-4-neon"})
         with self.assertRaises(ValueError):
             jev.build_request(CONFIG, {}, "task", "orchestrator")
 
+    def test_each_model_shows_its_public_coding_scores_and_jev_is_told_what_they_mean(self):
+        config = {**CONFIG, "models": {**flow.MODELS, "made-up/model": {"provider": "codex", "roles": ["implementer"]}}}
+        questions = jev.build_request(config, {"request": "Fix the login typo"}, "task")["questions"]
+        criteria = questions["implementer"]["criteria"]
+        self.assertRegex(criteria["gpt-6.2-sol"], r"^gpt-6\.2-sol \(Terminal-Bench \d+\.\d%, WebDev \d+; OpenAI via Codex\)$")
+        self.assertRegex(criteria["z-ai/glm-5.3-prime"], r"^z-ai/glm-5\.3-prime \(GLM-5\.3's scores: Terminal-Bench ")
+        self.assertEqual(criteria["made-up/model"], "made-up/model (no public coding score; OpenAI via Codex)")
+        self.assertIn("Terminal-Bench 4.1", questions["implementer"]["instructions"])
+        self.assertIn("LMArena WebDev", questions["implementer"]["instructions"])
+        reviewer = jev.build_request(CONFIG, {}, "task", "reviewer")["questions"]["reviewer"]
+        self.assertRegex(reviewer["criteria"]["gemini-4-neon"],
+                         r"^gemini-4-neon \(Terminal-Bench \d+\.\d%, WebDev \d+; Google via Antigravity\)$")
+        self.assertIn("Terminal-Bench 4.1", reviewer["instructions"])
+
     def test_jev_weighs_how_strong_each_model_is_and_not_what_it_costs(self):
         questions = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task")["questions"]
-        self.assertIn("strongest", questions["implementer"]["criteria"]["gpt-6.2-astra"])
         self.assertIn("right the first time", questions["implementer"]["instructions"])
         self.assertIn("right the first time", questions["implementerEffort"]["instructions"])
         asked = json.dumps(questions).lower()

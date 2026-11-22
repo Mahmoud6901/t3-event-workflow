@@ -23,10 +23,14 @@ MAX_RESPONSE_BYTES = 256_000
 TIMEOUT_SECONDS = 20
 ROLES = ("implementer", "reviewer", "devops")
 EFFORT_ROLES = ("implementer",)  # Jev sets no other role's effort.
-PROVIDER_LABELS = {"codex": "OpenAI via Codex", "claudeAgent": "Anthropic via Claude", "acpRegistry_goose": "OpenRouter via goose"}
+PROVIDER_LABELS = {"codex": "OpenAI via Codex", "claudeAgent": "Anthropic via Claude", "acpRegistry_goose": "OpenRouter via goose",
+                   "antigravity": "Google via Antigravity"}
 EFFORT_OPTIONS = {"low": "Quick.", "medium": "Balanced.", "high": "Thorough.",
                   "xhigh": "Very thorough.", "max": "Most thorough and slowest."}
-STRENGTH = {1: "light, for small well-specified changes", 2: "strong and quick", 3: "strongest"}  # By the model's tier.
+SCORES_FILE = Path(__file__).resolve().parent.parent / "assets" / "scores.json"  # Refreshed by scores.py.
+SCORES_MEANING = ("Each option shows its public coding scores where known, higher being better for both: Terminal-Bench "
+                  "4.1, the share of real terminal coding tasks it solved, and LMArena WebDev, how people rate the web "
+                  "apps it builds.")
 USE_WINDOWS_CURL = os.name == "nt"
 
 
@@ -37,6 +41,23 @@ def _eligible(config, role):
 
 def _choice(instructions, options):
     return {"type": "choice", "instructions": instructions, "criteria": options}
+
+
+def _scores():
+    try:
+        return json.loads(SCORES_FILE.read_text(encoding="utf-8")).get("models") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _label(model_id, spec, scores):
+    """The option Jev reads: the model, its public coding scores (a stand-in's, named as such) and who runs it."""
+    found = scores.get(model_id) or {}
+    shown = ", ".join(([f"Terminal-Bench {found['terminalBench']:.1f}%"] if "terminalBench" in found else []) +
+                      ([f"WebDev {found['webdev']:.0f}"] if "webdev" in found else [])) or "no public coding score"
+    if found.get("borrowedFrom"):
+        shown = f"{found['borrowedFrom']}'s scores: {shown}"
+    return f"{model_id} ({shown}; {PROVIDER_LABELS.get(spec.get('provider'), spec.get('provider'))})"
 
 
 def build_request(config, context, purpose="task", role="implementer"):
@@ -50,16 +71,14 @@ def build_request(config, context, purpose="task", role="implementer"):
         context = json.loads(json.dumps(context, ensure_ascii=False))
     except (TypeError, ValueError):
         raise ValueError("context must be JSON serializable") from None
-    questions = {}
-    options = {model_id: f"{model_id} ({STRENGTH.get(spec.get('tier'), 'strong')}, "
-                         f"{PROVIDER_LABELS.get(spec.get('provider'), spec.get('provider'))})"
-               for model_id, spec in _eligible(config, role).items()}
+    questions, scores = {}, _scores()
+    options = {model_id: _label(model_id, spec, scores) for model_id, spec in _eligible(config, role).items()}
     # No lean toward the defaults or toward the cheaper: Jev weighs every approved model by what it can do.
     questions[role] = _choice(
         f"Choose the approved {role} model most likely to get this task right the first time. Capability comes "
         "first: a stronger model for difficult, risky, large or unclear work, and a lighter one only when it would "
-        "do the task just as well, sooner. Price is not a reason either way. Choose even when uncertain, and report "
-        "your confidence honestly.",
+        f"do the task just as well, sooner. Price is not a reason either way. {SCORES_MEANING} Choose even when "
+        "uncertain, and report your confidence honestly.",
         options,
     )
     if role in EFFORT_ROLES:
