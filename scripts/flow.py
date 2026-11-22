@@ -38,7 +38,7 @@ MODELS = {
     "gemini-4-neon": {"provider": ANTIGRAVITY, "roles": ["implementer", "reviewer", "devops"]},
     "claude-sonnet-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
     "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
-}  # Jev weighs each by its public coding scores: assets/scores.json, refreshed by scores.py.
+}  # Jev weighs each by its LiveBench 2.0 scores: assets/scores.json, refreshed by scores.py.
 RETIRED = {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "deepseek/deepseek-v4.1-flash", "google/gemini-4-argon",
            "qwen/qwen3.8-flash", "moonshotai/kimi-k3.1-pro",
            "google/gemini-4-neon",  # Neon runs on Antigravity.

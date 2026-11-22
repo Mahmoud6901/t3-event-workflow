@@ -28,9 +28,6 @@ PROVIDER_LABELS = {"codex": "OpenAI via Codex", "claudeAgent": "Anthropic via Cl
 EFFORT_OPTIONS = {"low": "Quick.", "medium": "Balanced.", "high": "Thorough.",
                   "xhigh": "Very thorough.", "max": "Most thorough and slowest."}
 SCORES_FILE = Path(__file__).resolve().parent.parent / "assets" / "scores.json"  # Refreshed by scores.py.
-SCORES_MEANING = ("Each option shows its public coding scores where known, higher being better for both: Terminal-Bench "
-                  "4.1, the share of real terminal coding tasks it solved, and LMArena WebDev, how people rate the web "
-                  "apps it builds.")
 USE_WINDOWS_CURL = os.name == "nt"
 
 
@@ -44,19 +41,37 @@ def _choice(instructions, options):
 
 
 def _scores():
+    """The shipped scores, {"source", "suites", "models"}; {} when they cannot be read."""
     try:
-        return json.loads(SCORES_FILE.read_text(encoding="utf-8")).get("models") or {}
+        data = json.loads(SCORES_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _board(scores):
+    return (scores.get("source") or {}).get("label") or "public"
+
+
+def _meaning(scores):
+    """What the scores in the options measure, suite by suite, ending in a space; "" without any."""
+    suites = scores.get("suites") or {}
+    if not suites:
+        return ""
+    return (f"Each option shows its {_board(scores)} scores where known, from 0 to 100, higher being better, on tasks the "
+            "board's maintainers run themselves and do not publish: "
+            + "; ".join(f"{suite['name']}, {suite['measures']}" for suite in suites.values()) + ". ")
 
 
 def _label(model_id, spec, scores):
-    """The option Jev reads: the model, its public coding scores (a stand-in's, named as such) and who runs it."""
-    found = scores.get(model_id) or {}
-    shown = ", ".join(([f"Terminal-Bench {found['terminalBench']:.1f}%"] if "terminalBench" in found else []) +
-                      ([f"WebDev {found['webdev']:.0f}"] if "webdev" in found else [])) or "no public coding score"
-    if found.get("borrowedFrom"):
-        shown = f"{found['borrowedFrom']}'s scores: {shown}"
+    """The option Jev reads: the model, its scores in each chosen suite (a stand-in's, named as such) and who runs it."""
+    found = (scores.get("models") or {}).get(model_id) or {}
+    shown = ", ".join(f"{suite['name']} {found[key]:.1f}" for key, suite in (scores.get("suites") or {}).items()
+                      if key in found)
+    if not shown:
+        shown = f"no {_board(scores)} score"
+    else:
+        shown = (f"{found['borrowedFrom']}'s " if found.get("borrowedFrom") else "") + f"{_board(scores)} {shown}"
     return f"{model_id} ({shown}; {PROVIDER_LABELS.get(spec.get('provider'), spec.get('provider'))})"
 
 
@@ -77,7 +92,7 @@ def build_request(config, context, purpose="task", role="implementer"):
     questions[role] = _choice(
         f"Choose the approved {role} model most likely to get this task right the first time. Capability comes "
         "first: a stronger model for difficult, risky, large or unclear work, and a lighter one only when it would "
-        f"do the task just as well, sooner. Price is not a reason either way. {SCORES_MEANING} Choose even when "
+        f"do the task just as well, sooner. Price is not a reason either way. {_meaning(scores)}Choose even when "
         "uncertain, and report your confidence honestly.",
         options,
     )

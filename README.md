@@ -24,10 +24,14 @@ both, at setup or later: any model your T3 runs, at any effort T3 offers for it.
 models your T3 can run, and asks you to pick one for any role whose default it cannot run.
 
 With a Jev key, Jev chooses the model and effort of each task's implementer where you left them open,
-seeing each approved model's public coding scores from Terminal-Bench 4.1 and LMArena WebDev.
-Reviewers and DevOps run on your choice or the default. One exception: while T3 shows a model's usage
-limit as spent, Jev starts that role's new workers on an approved model of another provider, and they
-go back to your model when the limit resets.
+seeing each approved model's [LiveBench 2.0](https://livebench.ai/) scores, from tasks the board does
+not publish. Reviewers and DevOps run on your choice or the default. One exception: while T3 shows a
+model's usage limit as spent, Jev starts that role's new workers on an approved model of another
+provider, and they go back to your model when the limit resets.
+
+`python scripts/scores.py` refreshes those scores. Jev sees the Coding and Long Agentic suites;
+`--suites coding,long_agentic,browser` adds others (`design`, `research`, `data_analysis`,
+`reasoning` too), and later refreshes keep the choice.
 
 ```bash
 uv tool install git+https://github.com/Mahmoud6901/t3-event-workflow

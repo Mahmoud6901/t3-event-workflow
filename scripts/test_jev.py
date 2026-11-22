@@ -35,22 +35,33 @@ class TaskAdviceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             jev.build_request(CONFIG, {}, "task", "orchestrator")
 
-    def test_each_model_shows_its_public_coding_scores_and_jev_is_told_what_they_mean(self):
+    def test_each_model_shows_its_livebench_scores_and_jev_is_told_what_each_suite_measures(self):
         config = {**CONFIG, "models": {**flow.MODELS, "made-up/model": {"provider": "codex", "roles": ["implementer"]}}}
         questions = jev.build_request(config, {"request": "Fix the login typo"}, "task")["questions"]
         criteria = questions["implementer"]["criteria"]
-        self.assertRegex(criteria["gpt-6.2-sol"], r"^gpt-6\.2-sol \(Terminal-Bench \d+\.\d%, WebDev \d+; OpenAI via Codex\)$")
-        self.assertEqual(criteria["made-up/model"], "made-up/model (no public coding score; OpenAI via Codex)")
-        borrowed = {"gpt-6.2-astra": {"terminalBench": 62.12, "borrowedFrom": "GPT-6.2"}}
-        with patch.object(jev, "_scores", return_value=borrowed):
-            criteria = jev.build_request(CONFIG, {}, "task")["questions"]["implementer"]["criteria"]
-        self.assertEqual(criteria["gpt-6.2-astra"], "gpt-6.2-astra (GPT-6.2's scores: Terminal-Bench 62.1%; OpenAI via Codex)")
-        self.assertIn("Terminal-Bench 4.1", questions["implementer"]["instructions"])
-        self.assertIn("LMArena WebDev", questions["implementer"]["instructions"])
+        self.assertRegex(criteria["gpt-6.2-sol"],
+                         r"^gpt-6\.2-sol \(LiveBench 2\.0 Coding \d+\.\d, Long Agentic \d+\.\d; OpenAI via Codex\)$")
+        self.assertEqual(criteria["made-up/model"], "made-up/model (no LiveBench 2.0 score; OpenAI via Codex)")
+        self.assertIn("LiveBench 2.0", questions["implementer"]["instructions"])
+        self.assertIn("real merged-PR bug fixes", questions["implementer"]["instructions"])
         reviewer = jev.build_request(CONFIG, {}, "task", "reviewer")["questions"]["reviewer"]
         self.assertRegex(reviewer["criteria"]["gemini-4-neon"],
-                         r"^gemini-4-neon \(Terminal-Bench \d+\.\d%, WebDev \d+; Google via Antigravity\)$")
-        self.assertIn("Terminal-Bench 4.1", reviewer["instructions"])
+                         r"^gemini-4-neon \(LiveBench 2\.0 Coding \d+\.\d, Long Agentic \d+\.\d; Google via Antigravity\)$")
+        self.assertIn("LiveBench 2.0", reviewer["instructions"])
+
+    def test_a_suite_added_to_the_scores_reaches_jevs_options_and_instructions(self):
+        added = {"source": {"label": "LiveBench 2.0"},
+                 "suites": {"coding": {"name": "Coding", "measures": "real merged-PR bug fixes"},
+                            "browser": {"name": "Browser Use", "measures": "multi-step tasks in working web apps"}},
+                 "models": {"gpt-6.2-sol": {"coding": 83.7, "browser": 88.2},
+                            "gpt-6.2-astra": {"coding": 91.9, "borrowedFrom": "gpt-6.2"}}}
+        with patch.object(jev, "_scores", return_value=added):
+            question = jev.build_request(CONFIG, {}, "task")["questions"]["implementer"]
+        self.assertEqual(question["criteria"]["gpt-6.2-sol"],
+                         "gpt-6.2-sol (LiveBench 2.0 Coding 83.7, Browser Use 88.2; OpenAI via Codex)")
+        self.assertEqual(question["criteria"]["gpt-6.2-astra"],
+                         "gpt-6.2-astra (gpt-6.2's LiveBench 2.0 Coding 91.9; OpenAI via Codex)")
+        self.assertIn("Browser Use, multi-step tasks in working web apps", question["instructions"])
 
     def test_jev_weighs_how_strong_each_model_is_and_not_what_it_costs(self):
         questions = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task")["questions"]
