@@ -41,7 +41,7 @@ class TaskAdviceTests(unittest.TestCase):
         criteria = questions["implementer"]["criteria"]
         self.assertRegex(criteria["gpt-6.2-sol"],
                          r"^gpt-6\.2-sol \(LiveBench 2\.0 Coding \d+\.\d, Long Agentic \d+\.\d; OpenAI via Codex\)$")
-        self.assertEqual(criteria["made-up/model"], "made-up/model (no LiveBench 2.0 score; OpenAI via Codex)")
+        self.assertEqual(criteria["made-up/model"], "made-up/model (LiveBench 2.0 unknown; OpenAI via Codex)")
         self.assertIn("LiveBench 2.0", questions["implementer"]["instructions"])
         self.assertIn("real merged-PR bug fixes", questions["implementer"]["instructions"])
         reviewer = jev.build_request(CONFIG, {}, "task", "reviewer")["questions"]["reviewer"]
@@ -49,19 +49,25 @@ class TaskAdviceTests(unittest.TestCase):
                          r"^gemini-4-neon \(LiveBench 2\.0 Coding \d+\.\d, Long Agentic \d+\.\d; Google via Antigravity\)$")
         self.assertIn("LiveBench 2.0", reviewer["instructions"])
 
-    def test_a_suite_added_to_the_scores_reaches_jevs_options_and_instructions(self):
-        added = {"source": {"label": "LiveBench 2.0"},
-                 "suites": {"coding": {"name": "Coding", "measures": "real merged-PR bug fixes"},
-                            "browser": {"name": "Browser Use", "measures": "multi-step tasks in working web apps"}},
-                 "models": {"gpt-6.2-sol": {"coding": 83.7, "browser": 88.2},
-                            "gpt-6.2-astra": {"coding": 91.9, "borrowedFrom": "gpt-6.2"}}}
-        with patch.object(jev, "_scores", return_value=added):
+    def test_each_board_and_suite_in_the_scores_reaches_jev_and_a_board_without_a_model_shows_it_unknown(self):
+        boards = {"livebench": {"label": "LiveBench 2.0", "scale": "0 to 100",
+                                "suites": {"coding": {"name": "Coding", "measures": "real merged-PR bug fixes"},
+                                           "browser": {"name": "Browser Use", "measures": "multi-step tasks in web apps"}},
+                                "models": {"gpt-6.2-sol": {"coding": 83.7, "browser": 88.2},
+                                           "gpt-6.2-astra": {"coding": 91.9, "borrowedFrom": "gpt-6.2"}}},
+                  "other": {"label": "Other Board", "scale": "share solved, 0 to 1",
+                            "suites": {"private": {"name": "Private", "measures": "unpublished programs"}},
+                            "models": {"gpt-6.2-astra": {"private": 0.5}}}}
+        with patch.object(jev, "_scores", return_value=boards):
             question = jev.build_request(CONFIG, {}, "task")["questions"]["implementer"]
         self.assertEqual(question["criteria"]["gpt-6.2-sol"],
-                         "gpt-6.2-sol (LiveBench 2.0 Coding 83.7, Browser Use 88.2; OpenAI via Codex)")
+                         "gpt-6.2-sol (LiveBench 2.0 Coding 83.7, Browser Use 88.2; Other Board unknown; OpenAI via Codex)")
         self.assertEqual(question["criteria"]["gpt-6.2-astra"],
-                         "gpt-6.2-astra (gpt-6.2's LiveBench 2.0 Coding 91.9; OpenAI via Codex)")
-        self.assertIn("Browser Use, multi-step tasks in working web apps", question["instructions"])
+                         "gpt-6.2-astra (gpt-6.2's LiveBench 2.0 Coding 91.9; Other Board Private 0.5; OpenAI via Codex)")
+        self.assertIn("LiveBench 2.0, scored 0 to 100: Coding, real merged-PR bug fixes; Browser Use, multi-step tasks in "
+                      "web apps.", question["instructions"])
+        self.assertIn("Other Board, scored share solved, 0 to 1: Private, unpublished programs.", question["instructions"])
+        self.assertIn("unknown there, not weaker", question["instructions"])
 
     def test_jev_weighs_how_strong_each_model_is_and_not_what_it_costs(self):
         questions = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task")["questions"]

@@ -31,7 +31,9 @@ provider, and they go back to your model when the limit resets.
 
 `python scripts/scores.py` refreshes those scores. Jev sees the Coding and Long Agentic suites;
 `--suites coding,long_agentic,browser` adds others (`design`, `research`, `data_analysis`,
-`reasoning` too), and later refreshes keep the choice.
+`reasoning` too), and later refreshes keep the choice. Another board can join LiveBench when its
+maintainers run every model on tasks they do not publish and its data can be read without a key: it
+gets a reader in `BOARDS` in `scripts/scores.py`, and Jev shows a model it has not scored as unknown.
 
 ```bash
 uv tool install git+https://github.com/Mahmoud6901/t3-event-workflow

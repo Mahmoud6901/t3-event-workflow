@@ -1,41 +1,44 @@
 {
   "fetched": "2026-11-22",
-  "source": {
-    "label": "LiveBench 2.0",
-    "url": "https://livebench.ai/",
-    "release": "20261106",
-    "updated": "2026-11-19"
-  },
-  "suites": {
-    "coding": {
-      "name": "Coding",
-      "measures": "real merged-PR bug fixes on a frozen codebase, a fix that breaks other behaviour scoring 0"
-    },
-    "long_agentic": {
-      "name": "Long Agentic",
-      "measures": "long-running work: business apps extended over several turns of changing requirements, operations on a codebase over simulated months, and extended coding and optimisation"
-    }
-  },
-  "models": {
-    "gpt-6.2-sol": {
-      "coding": 83.7,
-      "long_agentic": 63.6
-    },
-    "gpt-6.2-astra": {
-      "coding": 91.9,
-      "long_agentic": 70.8
-    },
-    "gemini-4-neon": {
-      "coding": 89.7,
-      "long_agentic": 82.6
-    },
-    "claude-sonnet-5-5": {
-      "coding": 77.2,
-      "long_agentic": 62.5
-    },
-    "claude-opus-5-5": {
-      "coding": 87.1,
-      "long_agentic": 72.8
+  "boards": {
+    "livebench": {
+      "label": "LiveBench 2.0",
+      "url": "https://livebench.ai/",
+      "scale": "0 to 100",
+      "release": "20261106",
+      "updated": "2026-11-19",
+      "suites": {
+        "coding": {
+          "name": "Coding",
+          "measures": "real merged-PR bug fixes on a frozen codebase, a fix that breaks other behaviour scoring 0"
+        },
+        "long_agentic": {
+          "name": "Long Agentic",
+          "measures": "long-running work: business apps extended over several turns of changing requirements, operations on a codebase over simulated months, and extended coding and optimisation"
+        }
+      },
+      "models": {
+        "gpt-6.2-sol": {
+          "coding": 83.7,
+          "long_agentic": 63.6
+        },
+        "gpt-6.2-astra": {
+          "coding": 91.9,
+          "long_agentic": 70.8
+        },
+        "gemini-4-neon": {
+          "coding": 89.7,
+          "long_agentic": 82.6
+        },
+        "claude-sonnet-5-5": {
+          "coding": 77.2,
+          "long_agentic": 62.5
+        },
+        "claude-opus-5-5": {
+          "coding": 87.1,
+          "long_agentic": 72.8
+        }
+      }
     }
   }
 }

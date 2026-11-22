@@ -41,38 +41,35 @@ def _choice(instructions, options):
 
 
 def _scores():
-    """The shipped scores, {"source", "suites", "models"}; {} when they cannot be read."""
+    """The shipped scores by board, {key: {"label", "scale", "suites", "models", ...}}; {} when they cannot be read."""
     try:
-        data = json.loads(SCORES_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        boards = json.loads(SCORES_FILE.read_text(encoding="utf-8")).get("boards")
+    except (OSError, ValueError, AttributeError):
         return {}
-    return data if isinstance(data, dict) else {}
+    return boards if isinstance(boards, dict) else {}
 
 
-def _board(scores):
-    return (scores.get("source") or {}).get("label") or "public"
-
-
-def _meaning(scores):
-    """What the scores in the options measure, suite by suite, ending in a space; "" without any."""
-    suites = scores.get("suites") or {}
-    if not suites:
+def _meaning(boards):
+    """What the options' scores are and measure, board by board and suite by suite, ending in a space; "" without any."""
+    if not boards:
         return ""
-    return (f"Each option shows its {_board(scores)} scores where known, from 0 to 100, higher being better, on tasks the "
-            "board's maintainers run themselves and do not publish: "
-            + "; ".join(f"{suite['name']}, {suite['measures']}" for suite in suites.values()) + ". ")
+    return ("Each option shows its scores on boards whose maintainers run every model themselves on tasks they do not "
+            "publish, higher being better; a model a board has not scored is unknown there, not weaker. "
+            + " ".join(board["label"] + (f", scored {board['scale']}" if board.get("scale") else "") + ": "
+                       + "; ".join(f"{suite['name']}, {suite['measures']}" for suite in (board.get("suites") or {}).values())
+                       + "." for board in boards.values()) + " ")
 
 
-def _label(model_id, spec, scores):
-    """The option Jev reads: the model, its scores in each chosen suite (a stand-in's, named as such) and who runs it."""
-    found = (scores.get("models") or {}).get(model_id) or {}
-    shown = ", ".join(f"{suite['name']} {found[key]:.1f}" for key, suite in (scores.get("suites") or {}).items()
-                      if key in found)
-    if not shown:
-        shown = f"no {_board(scores)} score"
-    else:
-        shown = (f"{found['borrowedFrom']}'s " if found.get("borrowedFrom") else "") + f"{_board(scores)} {shown}"
-    return f"{model_id} ({shown}; {PROVIDER_LABELS.get(spec.get('provider'), spec.get('provider'))})"
+def _label(model_id, spec, boards):
+    """The option Jev reads: the model, its scores on each board (a stand-in's, named as such), and who runs it."""
+    shown = []
+    for board in boards.values():
+        found = (board.get("models") or {}).get(model_id) or {}
+        scored = ", ".join(f"{suite['name']} {found[key]}" for key, suite in (board.get("suites") or {}).items()
+                           if key in found)
+        stand_in = f"{found['borrowedFrom']}'s " if scored and found.get("borrowedFrom") else ""
+        shown.append(f"{stand_in}{board['label']} {scored or 'unknown'}")
+    return f"{model_id} ({'; '.join(shown) or 'no scores'}; {PROVIDER_LABELS.get(spec.get('provider'), spec.get('provider'))})"
 
 
 def build_request(config, context, purpose="task", role="implementer"):

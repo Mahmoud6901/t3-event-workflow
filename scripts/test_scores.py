@@ -31,44 +31,68 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(found["made-up/stand-in"], {"coding": 83.7, "browser": 88.2, "design": 80.0,
                                                      "borrowedFrom": "gpt-6.2-sol"})
 
-    def test_a_model_with_none_of_the_chosen_scores_stops_the_refresh(self):
-        with self.assertRaisesRegex(ValueError, "made-up/model"):
-            scores.build(scores.parse(TABLE), {"made-up/model": "made-up"}, ("coding",))
-
     def test_the_releases_come_from_the_sites_bundle(self):
         self.assertEqual(scores.releases(BUNDLE), ["20261014", "20261025", "20261106"])
         with self.assertRaisesRegex(ValueError, "--release"):
             scores.releases("const en=[];")
 
-    def test_the_suites_option_is_kept_by_later_refreshes_and_an_unknown_suite_is_refused(self):
+    def refresh(self, *argv, names=None, boards=None):
+        """Run the refresh against the trimmed LiveBench table, writing to a temporary file; its data."""
+        names = names or {"livebench": {"gpt-6.2-sol": "gpt-6.2-sol", "gemini-4-neon": "gemini-4-neon"}}
+        with patch.object(scores, "FILE", self.file), patch.object(scores, "NAMES", names), \
+                patch.object(scores, "BOARDS", boards or scores.BOARDS), \
+                patch.object(scores, "fetch", return_value=("20261106", scores.parse(TABLE), "2026-11-19")) as fetch, \
+                contextlib.redirect_stdout(io.StringIO()):
+            scores.main(list(argv))
+        self.fetched = [*getattr(self, "fetched", []), *(c.args for c in fetch.call_args_list)]
+        return json.loads(self.file.read_text(encoding="utf-8"))
+
+    def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
-        file = Path(folder.name) / "scores.json"
-        names = {"gpt-6.2-sol": "gpt-6.2-sol", "gemini-4-neon": "gemini-4-neon"}
-        fetched = ("20261106", scores.parse(TABLE), "2026-11-19")
-        with patch.object(scores, "FILE", file), patch.object(scores, "NAMES", names), \
-                patch.object(scores, "fetch", return_value=fetched) as fetch, contextlib.redirect_stdout(io.StringIO()):
-            scores.main([])
-            self.assertEqual(list(json.loads(file.read_text(encoding="utf-8"))["suites"]), ["coding", "long_agentic"])
-            scores.main(["--suites", "coding,long_agentic,browser"])
-            scores.main([])
-            data = json.loads(file.read_text(encoding="utf-8"))
-            self.assertEqual(list(data["suites"]), ["coding", "long_agentic", "browser"], "a plain refresh keeps the choice")
-            self.assertEqual(data["suites"]["browser"]["name"], "Browser Use")
-            self.assertEqual(data["models"]["gemini-4-neon"], {"coding": 89.7, "long_agentic": 82.6, "browser": 95.6})
-            self.assertEqual(data["source"], {"label": "LiveBench 2.0", "url": "https://livebench.ai/",
-                                              "release": "20261106", "updated": "2026-11-19"})
-            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
-                scores.main(["--suites", "coding,vibes"])
-            self.assertEqual(json.loads(file.read_text(encoding="utf-8")), data, "a refused refresh writes nothing")
-            scores.main(["--release", "20261025"])
-        self.assertEqual([c.args for c in fetch.call_args_list], [(None,)] * 3 + [("20261025",)])
+        self.file = Path(folder.name) / "scores.json"
 
-    def test_every_approved_model_has_its_board_name_and_its_shipped_scores(self):
-        self.assertEqual(set(flow.MODELS) - set(scores.NAMES), set())
-        shipped = json.loads((Path(flow.ROOT) / "assets" / "scores.json").read_text(encoding="utf-8"))
-        self.assertEqual(set(flow.MODELS) - set(shipped["models"]), set())
-        self.assertLessEqual(set(shipped["suites"]), set(scores.SUITES))
+    def test_the_suites_option_is_kept_by_later_refreshes_and_an_unknown_suite_is_refused(self):
+        self.assertEqual(list(self.refresh()["boards"]["livebench"]["suites"]), ["coding", "long_agentic"])
+        self.refresh("--suites", "coding,long_agentic,browser")
+        data = self.refresh()
+        livebench = data["boards"]["livebench"]
+        self.assertEqual(list(livebench["suites"]), ["coding", "long_agentic", "browser"], "a plain refresh keeps the choice")
+        self.assertEqual(livebench["suites"]["browser"]["name"], "Browser Use")
+        self.assertEqual(livebench["models"]["gemini-4-neon"], {"coding": 89.7, "long_agentic": 82.6, "browser": 95.6})
+        self.assertEqual({k: livebench[k] for k in ("label", "url", "scale", "release", "updated")},
+                         {"label": "LiveBench 2.0", "url": "https://livebench.ai/", "scale": "0 to 100",
+                          "release": "20261106", "updated": "2026-11-19"})
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.refresh("--suites", "coding,vibes")
+        self.assertEqual(json.loads(self.file.read_text(encoding="utf-8")), data, "a refused refresh writes nothing")
+        self.refresh("--release", "20261025")
+        self.assertEqual(self.fetched, [(None,)] * 3 + [("20261025",)])
+
+    def test_another_board_joins_the_scores_and_a_model_it_has_not_scored_is_left_to_the_others(self):
+        def other(args):
+            return {"label": "Other Board", "url": "https://example.org/", "scale": "0 to 100", "release": "1",
+                    "updated": "2026-11-20", "suites": {"private": {"name": "Private", "measures": "unpublished tasks"}},
+                    "models": {"gpt-6.2-sol": {"private": 50.0}}}
+        boards = {**scores.BOARDS, "other": other}
+        names = {"livebench": {"gpt-6.2-sol": "gpt-6.2-sol", "gemini-4-neon": "gemini-4-neon"},
+                 "other": {"gpt-6.2-sol": "Sol"}}
+        data = self.refresh(names=names, boards=boards)
+        self.assertEqual(list(data["boards"]), ["livebench", "other"])
+        self.assertEqual(data["boards"]["other"]["models"], {"gpt-6.2-sol": {"private": 50.0}})
+        self.assertIn("gemini-4-neon", data["boards"]["livebench"]["models"])
+
+    def test_a_model_no_board_scores_stops_the_refresh_and_writes_nothing(self):
+        names = {"livebench": {"gpt-6.2-sol": "gpt-6.2-sol", "made-up/model": "made-up"}}
+        with self.assertRaisesRegex(ValueError, "made-up/model"):
+            self.refresh(names=names)
+        self.assertFalse(self.file.exists())
+
+    def test_every_approved_model_is_named_on_a_board_and_has_shipped_scores(self):
+        self.assertEqual(set(flow.MODELS) - {m for names in scores.NAMES.values() for m in names}, set())
+        boards = json.loads((Path(flow.ROOT) / "assets" / "scores.json").read_text(encoding="utf-8"))["boards"]
+        self.assertEqual(set(flow.MODELS) - {m for board in boards.values() for m in board["models"]}, set())
+        self.assertLessEqual(set(boards["livebench"]["suites"]), set(scores.SUITES))
 
 
 if __name__ == "__main__":
