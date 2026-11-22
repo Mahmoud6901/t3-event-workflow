@@ -14,6 +14,8 @@ from unittest.mock import patch  # noqa: E402
 import flow  # noqa: E402
 import github  # noqa: E402
 import harness  # noqa: E402
+import jev  # noqa: E402
+import store  # noqa: E402
 
 def levels(*ids):
     return [{"id": i, "label": i.title()} for i in ids]
@@ -43,6 +45,12 @@ CODEX_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [
               for s in ("gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra")]
 
 SPENT = [{"id": "five_hour", "kind": "session", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]
+# Scores as scores.py writes them. Astra leads on Coding, but Neon has the best average and Sol the worst.
+SCORES = {"fetched": "2026-11-22", "boards": {"livebench": {
+    "label": "LiveBench 2.0", "scale": "0 to 100",
+    "suites": {"coding": {"name": "Coding", "measures": "bug fixes"}, "long_agentic": {"name": "Long Agentic", "measures": "long work"}},
+    "models": {"gpt-6.2-sol": {"coding": 70.0, "long_agentic": 60.0}, "gpt-6.2-astra": {"coding": 90.0, "long_agentic": 70.0},
+               "gemini-4-neon": {"coding": 85.0, "long_agentic": 85.0}}}}}
 
 ORCH = "thread-orch"
 PROJECT = "proj-1"
@@ -172,6 +180,11 @@ class FlowTests(unittest.TestCase):
         patcher = patch.object(flow, "T3_CACHES", self.caches)
         patcher.start()
         self.addCleanup(patcher.stop)
+        scores = root / "scores.json"
+        scores.write_text(json.dumps(SCORES), encoding="utf-8")
+        patcher = patch.object(jev, "SCORES_FILE", scores)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def call(self, request):
         return harness.run(["--db", str(self.db)], json.dumps(request), hub=lambda repo: self.hub, jev=self.advise)
@@ -250,21 +263,38 @@ class FlowTests(unittest.TestCase):
         self.t3_caches(auth={"status": "unauthenticated"})
         self.assertIn("not signed in", self.orchestrator("models")["providers"]["goose"])
 
-    def test_without_codex_setup_needs_a_pick_for_the_implementer_and_it_runs_on_claude(self):
+    def test_without_codex_or_antigravity_setup_needs_a_pick_for_the_implementer_and_it_runs_on_claude(self):
         self.t3_caches(codex=None)
         found = self.orchestrator("models")
-        self.assertEqual(found["defaults"]["implementer"], {"model": "gpt-6.2-sol", "effort": "xhigh", "runs": False})
+        self.assertEqual(found["defaults"]["implementer"], {"model": None, "fallback": None, "effort": "xhigh", "runs": False})
         self.assertEqual(found["defaults"]["reviewer"], {"model": "claude-opus-5-5", "effort": "xhigh", "runs": True})
         refused = self.orchestrator("init", workspace=str(self.workspace), repo=REPO, requiredChecks=["acceptance"], checks=[],
                                     noChecksReason="Test project")
-        self.assertIn("T3 cannot run gpt-6.2-sol, the implementer's default", refused.get("error", ""))
+        self.assertIn("T3 runs none of the approved implementers", refused.get("error", ""))
         self.bind(picks={"implementer": "claude-sonnet-5-5"})
         self.assertFalse(self.orchestrator("pick", role="implementer", model="default", authorization="Back to default.")["ok"],
-                         "a default T3 could not run stays out of reach")
+                         "Jev could choose only among models T3 cannot run")
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         (call,) = self.orchestrator("next")["calls"]
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "claudeAgent", "model": "claude-sonnet-5-5",
                                                        "options": {"effort": "xhigh"}})
+
+    def test_jev_chooses_the_implementer_and_without_its_answer_the_best_scored_model_t3_runs_starts(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
+        self.assertEqual(self.orchestrator("models")["defaults"]["implementer"],
+                         {"model": None, "fallback": "gemini-4-neon", "effort": "xhigh", "runs": True})
+        self.bind()
+        self.assertEqual(self.status()["models"]["implementer"],
+                         {"model": None, "modelSource": "jev", "effort": "xhigh", "effortSource": "default"})
+        self.jev_answer = {}  # No answer: no Jev key, Jev unreachable, or an invalid reply.
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
+                                                       "options": {"thought_level": "xhigh"}}, "the best average, not the best Coding")
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage={"antigravity": SPENT})
+        self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
+        (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra", "the next best, while Neon is at its limit")
 
     def test_jev_advises_only_among_the_models_t3_can_run(self):
         self.t3_caches(goose=None)
@@ -288,16 +318,19 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
                                                        "options": {"thought_level": "high"}})
 
-    def test_a_retired_model_leaves_a_bound_projects_list_and_its_retired_default_moves_to_the_current_one(self):
+    def test_a_retired_model_leaves_a_bound_projects_list_and_an_older_bindings_defaults_give_way(self):
         retired = ("gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra")
         bound_before = {**flow.MODELS, **{m: {"provider": "codex", "tier": tier, "roles": ["implementer"]}
                                           for tier, m in enumerate(retired, 1)}}
-        self.bind(models=bound_before, defaults={"implementer": "gpt-6.1-sol"})
-        self.assertEqual(self.status()["models"]["implementer"]["model"], "gpt-6.2-sol")
-        self.jev_answer = {}  # No advice, so the default stands.
+        self.bind(models=bound_before)
+        self.stored_defaults(implementer="gpt-6.2-sol", devops="claude-haiku-5-5")  # As a binding before 0.8.0 keeps them.
+        models = self.status()["models"]
+        self.assertEqual(models["implementer"]["modelSource"], "jev", "the implementer has no default model now")
+        self.assertEqual(models["devops"]["model"], "claude-sonnet-5-5", "a retired default moves to the current one")
+        self.jev_answer = {}  # No answer, so the best-scored model starts, not the old default.
         self.queue("Fix the login typo")
         (call,) = self.start()
-        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-sol")
+        self.assertEqual(call["arguments"]["target"]["model"], "gemini-4-neon")
         self.assertIn("gpt-6.2-astra", self.jev_models)
         self.assertFalse(set(retired) & set(self.jev_models), self.jev_models)
 
@@ -477,7 +510,7 @@ class FlowTests(unittest.TestCase):
                          {"model": "qwen/qwen3.8-flash", "modelSource": "pick", "effort": "xhigh", "effortSource": "default"})
         self.assertTrue(self.orchestrator("pick", role="implementer", model=None, authorization="Back to the default.")["ok"])
         self.assertEqual(self.orchestrator("status")["models"]["implementer"],
-                         {"model": "gpt-6.2-sol", "modelSource": "default", "effort": "xhigh", "effortSource": "default"})
+                         {"model": None, "modelSource": "jev", "effort": "xhigh", "effortSource": "default"})
 
     def test_the_user_sets_a_roles_model_and_effort_apart_and_puts_each_back(self):
         self.t3_caches()
@@ -578,6 +611,17 @@ class FlowTests(unittest.TestCase):
         result = self.orchestrator("status")
         self.assertTrue(result["ok"], result)
         return result
+
+    def stored_defaults(self, **defaults):
+        """The binding's defaults as an older version stored them."""
+        db = store.connect(self.db)
+        try:
+            with db:
+                config = json.loads(db.execute("SELECT config FROM projects WHERE id=?", (PROJECT,)).fetchone()[0])
+                config["defaults"].update(defaults)
+                db.execute("UPDATE projects SET config=? WHERE id=?", (store.packed(config), PROJECT))
+        finally:
+            db.close()
 
     def test_a_confirmed_start_is_not_handed_out_again(self):
         self.bind()

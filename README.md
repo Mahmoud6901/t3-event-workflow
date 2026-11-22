@@ -18,16 +18,18 @@ Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/) (or pipx), Git, the
 signed in), and T3 Code with at least one of Claude, Codex, goose (for OpenRouter) or Antigravity signed in. The
 orchestrator runs on Claude Code (`claude`) or Codex (`codex`), so one of them must be on PATH.
 
-The default models are GPT-6.2-Sol (Codex) for implementers and Opus 5.5 for reviewers, each at
-`xhigh` effort, and Sonnet 5.5 for DevOps at `high`. You can choose each role's model, its effort, or
-both, at setup or later: any model your T3 runs, at any effort T3 offers for it. Setup checks which
-models your T3 can run, and asks you to pick one for any role whose default it cannot run.
+The default models are Opus 5.5 for reviewers at `xhigh` effort and Sonnet 5.5 for DevOps at `high`.
+Implementers have no default model: Jev chooses one for each task. You can choose each role's model,
+its effort, or both, at setup or later: any model your T3 runs, at any effort T3 offers for it. Setup
+checks which models your T3 can run, and asks you to pick one for any role it cannot start.
 
 With a Jev key, Jev chooses the model and effort of each task's implementer where you left them open,
 seeing each approved model's [LiveBench 2.0](https://livebench.ai/) scores, from tasks the board does
-not publish. Reviewers and DevOps run on your choice or the default. One exception: while T3 shows a
-model's usage limit as spent, Jev starts that role's new workers on an approved model of another
-provider, and they go back to your model when the limit resets.
+not publish. Without Jev's answer (no key, Jev unreachable, or an invalid reply), the implementer runs
+on the approved model with the best average score that T3 runs, at your effort or `xhigh`. Reviewers and DevOps run
+on your choice or the default. One exception: while T3 shows a model's usage limit as spent, Jev
+starts that role's new workers on an approved model of another provider, and they go back to your
+model when the limit resets.
 
 `python scripts/scores.py` refreshes those scores. Jev sees the Coding and Long Agentic suites;
 `--suites coding,long_agentic,browser` adds others (`design`, `research`, `data_analysis`,
@@ -50,8 +52,9 @@ new version (see [Each project apart](#each-project-apart)).
 Then:
 
 1. **Jev key (optional):** put the raw TypeSafe key on one line in
-   `~/.t3-workflow/secrets/typesafe-api-key.txt`, or set `TYPESAFE_API_KEY`. Without it, every task
-   uses the chosen or default models.
+   `~/.t3-workflow/secrets/typesafe-api-key.txt`, or set `TYPESAFE_API_KEY`. Without it, an implementer
+   whose model you left open runs on the best-scored approved model T3 runs; the rest use the chosen
+   or default models.
 2. **GitHub's `workflow` scope (optional):** run `gh auth refresh -s workflow` if git on this computer
    signs in through `gh` (`gh auth setup-git`). Without that scope, GitHub refuses pushes that change
    files in `.github/workflows/`, such as DevOps's pipeline fixes. With Git Credential Manager, pushes

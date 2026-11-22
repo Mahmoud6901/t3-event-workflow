@@ -1,7 +1,8 @@
 """Jev's advice for one new worker of the delegated PR workflow: its model, and for an implementer its effort.
 
 The harness owns the workflow and its defaults. This module only builds one request, validates one response and keeps
-the valid choices; anything missing or invalid is left to the defaults (flow.default_jev).
+the valid choices; anything missing or invalid is left to the harness (flow.default_jev): an implementer's model to the
+best-scored one it can run (ranked), the rest to the defaults.
 """
 
 from __future__ import annotations
@@ -47,6 +48,19 @@ def _scores():
     except (OSError, ValueError, AttributeError):
         return {}
     return boards if isinstance(boards, dict) else {}
+
+
+def ranked(model_ids):
+    """The models best first, by their average over every suite score of every board; one no board scored comes last,
+    and a tie keeps the given order."""
+    boards = _scores()
+
+    def average(model_id):
+        found = [score for board in boards.values()
+                 for key, score in ((board.get("models") or {}).get(model_id) or {}).items()
+                 if key in (board.get("suites") or {}) and isinstance(score, (int, float))]
+        return sum(found) / len(found) if found else -math.inf
+    return sorted(model_ids, key=average, reverse=True)
 
 
 def _meaning(boards):
@@ -278,7 +292,7 @@ def evaluate(config, context, purpose="task", response=None, role="implementer")
             return {"status": "unavailable", "reason": error, **empty}
     if not isinstance(response, dict) or response.get("model") != config.get("jev", {}).get("model"):
         return {"status": "unavailable", "reason": "invalid_response_model", **empty}
-    # No confidence threshold: every valid answer applies; a missing or invalid one is left to the defaults.
+    # No confidence threshold: every valid answer applies; a missing or invalid one is left to the harness.
     parsed = {key: _answer(response, key, question["criteria"]) for key, question in payload["questions"].items()}
     models = {role: parsed[role][0]} if parsed[role][0] is not None else {}
     efforts = {role: parsed[role + "Effort"][0]} if parsed.get(role + "Effort", (None,))[0] is not None else {}

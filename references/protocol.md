@@ -51,7 +51,7 @@ runs [harness.py](../scripts/harness.py).
 - **setup_github** applies the repo settings and protection in [setup](setup.md#4-protect-the-branch),
   and needs the user's own words.
 - **pick** sets a role's model (from `models`), its effort, or both; the other stays. An effort is one of
-  the model's `efforts`, or low to max alone. `"default"` puts one back (a model, if T3 runs it).
+  the model's `efforts`, or low to max alone. `"default"` puts one back.
   Running workers keep theirs.
 - **devops** turns DevOps on or off for plans that start later; `keep` lists running plans that stay as
   they are. Off, `next` merges each confirmed PR itself, one at a time, with DevOps's update and merge
@@ -114,7 +114,7 @@ A refused command changes nothing. Its error says what to do.
 
 `init` creates a binding, paused; [setup](setup.md#3-bind-it) lists its fields.
 
-Jev picks, per task, an implementer's model left open, even after "back to default", and its effort unless set; a stand-in at a usage limit. No answer: the defaults apply.
+Jev picks, per task, an implementer's model left open (it has no default) and its effort unless set; a stand-in at a usage limit. No answer: the best-scored implementer T3 runs, else the defaults.
 
 **Problems:** `status` lists any background part (watcher scan, its sends, hooks, Jev, GitHub, a
 checkout) that failed three times in a row. A part's next success clears it.

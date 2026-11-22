@@ -21,7 +21,6 @@
     }
   ],
   "defaults": {
-    "implementer": "gpt-6.2-sol",
     "implementerEffort": "xhigh",
     "reviewer": "claude-opus-5-5",
     "reviewerEffort": "xhigh",

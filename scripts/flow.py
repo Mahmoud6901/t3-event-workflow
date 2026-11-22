@@ -44,8 +44,8 @@ RETIRED = {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "deepseek/deepseek-v4.1-f
            "google/gemini-4-neon",  # Neon runs on Antigravity.
            "claude-haiku-5-5", "deepseek/deepseek-v4.1-flash-1017",
            "z-ai/glm-5.3-prime"}  # Gone from every project's list, even one bound with them.
-DEFAULTS = {"implementer": "gpt-6.2-sol", "implementerEffort": "xhigh", "reviewer": "claude-opus-5-5",
-            "reviewerEffort": "xhigh", "devops": "claude-sonnet-5-5", "devopsEffort": "high"}
+DEFAULTS = {"implementerEffort": "xhigh", "reviewer": "claude-opus-5-5", "reviewerEffort": "xhigh",
+            "devops": "claude-sonnet-5-5", "devopsEffort": "high"}  # No implementer model: Jev chooses it, else best_scored.
 QUIET_MINUTES = 30
 NUDGES = 1  # Follow-ups asking a worker that ended without its closing command to finish; then the task is blocked.
 OPEN = ("waiting", "ready", "implementing", "review_needed", "reviewing", "approved", "asking", "confirmed",
@@ -118,13 +118,16 @@ def validate_config(raw):
     require(isinstance(hub.get("requiredChecks"), list) and all(isinstance(c, str) and c for c in hub["requiredChecks"]),
             "github.requiredChecks must list the CI check names")
     config.setdefault("models", copy.deepcopy(MODELS))
-    config["defaults"] = {**DEFAULTS, **(config.get("defaults") or {})}
+    config["defaults"] = {key: value for key, value in {**DEFAULTS, **(config.get("defaults") or {})}.items() if key in DEFAULTS}
     for model_id, item in config["models"].items():
         require(item.get("provider") in PROVIDERS, f"{model_id}: provider is one of {', '.join(PROVIDERS)}")
         require(set(item.get("roles") or []) <= set(ROLES), f"{model_id}: roles are implementer, reviewer and devops")
     for role in ROLES:
-        model = config["defaults"][role]
-        require(role in (config["models"].get(model) or {}).get("roles", []), f"defaults.{role} must be an approved {role} model")
+        if role in config["defaults"]:
+            require(role in (config["models"].get(config["defaults"][role]) or {}).get("roles", []),
+                    f"defaults.{role} must be an approved {role} model")
+        else:  # Jev chooses among the approved ones.
+            require(any(role in item.get("roles", []) for item in config["models"].values()), f"models must approve an {role}")
         require(config["defaults"][role + "Effort"] in EFFORTS, f"defaults.{role}Effort must be one of {', '.join(EFFORTS)}")
     config.setdefault("checks", [])
     require(isinstance(config["checks"], list), "checks must be a list")
@@ -191,6 +194,15 @@ def runs(lists, model, provider):
     return None if lists is None else model in lists.get(provider, {})
 
 
+def best_scored(config, role, lists, spent=None):
+    """What a role with no default model starts on when Jev gives no answer: the approved model with the best scores that
+    T3 runs, one with capacity first. None when T3 runs none."""
+    able = [m for m, item in config["models"].items()
+            if role in item.get("roles", []) and runs(lists, m, item["provider"]) is not False]
+    free = [m for m in able if not at_limit(spent or {}, m, config["models"][m]["provider"])]
+    return next(iter(jev.ranked(free or able)), None)
+
+
 def t3_limits():
     """The usage limits T3 shows as spent: {provider: the model families covered, "" standing for every model}. A window
     counts while it is full and its reset is still ahead. T3 names a family's own window after the general one
@@ -228,11 +240,12 @@ def at_limit(spent, model, provider):
 
 
 def usual(config, state, role):
-    """The model a role runs on without advice, and its provider: the user's pick, else the default."""
+    """The model a role runs on without advice, and its provider: the user's pick, else the default. (None, None) for an
+    implementer left to Jev."""
     pick = (state.get("picks") or {}).get(role) or {}
     if pick.get("model"):
         return pick["model"], pick.get("provider", GOOSE)
-    model = config["defaults"][role]
+    model = config["defaults"].get(role)
     return model, (config["models"].get(model) or {}).get("provider")
 
 
@@ -264,11 +277,12 @@ def update_fix(config, outcome, number):
 
 
 def role_model(config, state, role):
-    """What a new worker in this role starts on: the user's model and effort where set, else the defaults. Jev may
-    advise an implementer's model and effort where the user set none, and stands in for any role's model that is at
-    its usage limit."""
+    """What a new worker in this role starts on: the user's model and effort where set, else the defaults. An
+    implementer's model the user left open is Jev's, chosen per task ("jev"), and Jev may set its effort; Jev also
+    stands in for any role's model that is at its usage limit."""
     pick = (state.get("picks") or {}).get(role) or {}
-    return {"model": pick.get("model") or config["defaults"][role], "modelSource": "pick" if pick.get("model") else "default",
+    model = pick.get("model") or config["defaults"].get(role)
+    return {"model": model, "modelSource": "pick" if pick.get("model") else "default" if model else "jev",
             "effort": pick.get("effort") or config["defaults"][role + "Effort"],
             "effortSource": "pick" if pick.get("effort") else "default"}
 
@@ -311,8 +325,8 @@ def settle_pick(role, current, raw, defaults, lists):
 
 
 def default_jev(config, context, role="implementer"):
-    """Jev's valid model for one role of one task, and an implementer's effort; the rest fall back to the defaults.
-    Raises when Jev gives no answer, so the caller records the problem and uses the defaults."""
+    """Jev's valid model for one role of one task, and an implementer's effort; add_worker fills in what it leaves out.
+    Raises when Jev gives no answer, so the caller records the problem and the worker starts without advice."""
     decision = jev.evaluate(config, context, "task", role=role)
     if decision["status"] != "decided":
         raise RuntimeError(f"Jev gave no advice: {decision['reason']}")
@@ -372,9 +386,11 @@ class Flow:
         require(row, f"Project {project} has no binding")
         config = json.loads(row[0])
         # A model approved after the project was bound joins its list and a retired one leaves it, its default giving
-        # way to the current one. Jev weighs only the models T3 runs at the time.
+        # way to the current one. An implementer default an older version stored goes: Jev chooses that model. Jev
+        # weighs only the models T3 runs at the time.
         config["models"] = {m: item for m, item in {**MODELS, **(config.get("models") or {})}.items() if m not in RETIRED}
-        config["defaults"] = {key: DEFAULTS[key] if value in RETIRED else value for key, value in config["defaults"].items()}
+        config["defaults"] = {key: DEFAULTS[key] if value in RETIRED else value for key, value in config["defaults"].items()
+                              if key in DEFAULTS}
         return config, json.loads(row[1])
 
     def transact(self, project, change, op):
@@ -430,11 +446,18 @@ class Flow:
         state["devopsOn"] = devops
         if lists is not None:  # Every role must start on something this T3 runs, and Jev advises only among those.
             for role in ROLES:
-                model = config["defaults"][role]
-                provider = config["models"][model]["provider"]
-                require(state["picks"].get(role, {}).get("model") or runs(lists, model, provider),
-                        f"T3 cannot run {model}, the {role}'s default ({why.get(provider) or 'T3 does not list it'}). "
-                        f"Pick a model for the {role}; the models operation lists what T3 runs.")
+                if state["picks"].get(role, {}).get("model"):
+                    continue
+                model = config["defaults"].get(role)
+                if model:
+                    provider = config["models"][model]["provider"]
+                    require(runs(lists, model, provider),
+                            f"T3 cannot run {model}, the {role}'s default ({why.get(provider) or 'T3 does not list it'}). "
+                            f"Pick a model for the {role}; the models operation lists what T3 runs.")
+                else:
+                    approved = ", ".join(m for m, item in config["models"].items() if role in item.get("roles", []))
+                    require(best_scored(config, role, lists), f"T3 runs none of the approved {role}s ({approved}). "
+                            f"Pick a model for the {role}; the models operation lists what T3 runs.")
             config["models"] = {m: item for m, item in config["models"].items() if runs(lists, m, item["provider"])}
         with self.db:
             exists = self.db.execute("SELECT 1 FROM projects WHERE id=?", (project,)).fetchone()
@@ -443,11 +466,16 @@ class Flow:
         return {"projectId": project, "control": "paused", "repo": config["github"]["repo"]}
 
     def models(self, req):
-        """For setup and model changes: which providers T3 can run, whether it runs each role's default, and the models
-        whose names hold every word searched for."""
+        """For setup and model changes: which providers T3 can run, whether it runs each role's default (for the
+        implementer, which Jev chooses, the fallback when Jev gives no answer), and the models whose names hold every
+        word searched for."""
         lists, why = t3_lists()
-        defaults = {role: {"model": DEFAULTS[role], "effort": DEFAULTS[role + "Effort"],
-                           "runs": runs(lists, DEFAULTS[role], MODELS[DEFAULTS[role]]["provider"])} for role in ROLES}
+        defaults = {}
+        for role in ROLES:
+            model = DEFAULTS.get(role)
+            starts = model or best_scored({"models": MODELS}, role, lists)
+            defaults[role] = {"model": model, **({} if model else {"fallback": starts}), "effort": DEFAULTS[role + "Effort"],
+                              "runs": runs(lists, starts, MODELS[starts]["provider"]) if starts else False}
         if lists is None:
             return {"known": False, "defaults": defaults,
                     "reason": "T3's model lists are not on this computer, so nothing can be checked or picked."}
@@ -470,9 +498,13 @@ class Flow:
         def change(config, state):
             picks = state.setdefault("picks", {})
             if "model" in raw and raw["model"] in CLEAR:
-                model = config["defaults"][role]
-                require(model in config["models"] and runs(lists, model, config["models"][model]["provider"]) is not False,
-                        f"T3 cannot run {model}, the {role}'s default; pick another model")
+                model = config["defaults"].get(role)
+                if model:
+                    require(model in config["models"] and runs(lists, model, config["models"][model]["provider"]) is not False,
+                            f"T3 cannot run {model}, the {role}'s default; pick another model")
+                else:
+                    require(best_scored(config, role, lists), f"T3 runs none of the approved {role}s, so Jev has none to "
+                            f"choose; pick another model")
             pick = settle_pick(role, picks.get(role), raw, config["defaults"], lists)
             if pick:
                 picks[role] = pick
@@ -776,10 +808,11 @@ class Flow:
         task = state["tasks"][self.task_id(state, name)]
         kept = task.get("choice") or {}  # Jev's advice at the task's first start.
         advice, spent = {}, t3_limits()
-        # With a limit spent the new worker may need a stand-in, and one that had a stand-in is advised afresh.
-        if (spent or kept.get("limit")) and role_of(task) in ("implementer", "reviewer"):
+        # With a limit spent the new worker may need a stand-in; a stand-in, or a choice a limit narrowed, is advised afresh.
+        stale = kept.get("limit") or kept.get("narrowed")
+        if (spent or stale) and role_of(task) in ("implementer", "reviewer"):
             advice = self.advise(config, state, role_of(task), described(task), t3_lists()[0], spent)
-        kept = {} if kept.get("limit") else kept
+        kept = {} if stale else kept
 
         def change(config, state):
             task = state["tasks"][self.task_id(state, name)]
@@ -972,21 +1005,26 @@ class Flow:
 
     def add_worker(self, config, state, role, plan, task_id, choice=None):
         """Model and effort each come from the user's setting for the role; else Jev's advice (it names an approved
-        model); else the default. Advice marked "limit" stands in for a model at its usage limit, the user's own
-        included. The worker keeps its model entry, so a later change never reaches a worker already started."""
+        model); else the default. An implementer has no default model: without Jev's answer it starts on the approved
+        one with the best scores that T3 runs. Advice marked "limit" stands in for a model at its usage limit, the
+        user's own included. The worker keeps its model entry, so a later change never reaches a worker already started."""
         pick = (state.get("picks") or {}).get(role) or {}
         choice = choice or {}
         stand_in = bool(choice.get("limit"))
         advised = choice.get(role) if role in (config["models"].get(choice.get(role)) or {}).get("roles", []) else None
         model = advised if stand_in or not pick.get("model") else None
+        source = ("limit" if stand_in else "jev") if model else "default"
+        if not model and not pick.get("model") and role not in config["defaults"]:
+            lists = t3_lists()[0]
+            model, source = best_scored(config, role, lists, t3_limits()) or best_scored(config, role, None), "scores"
         effort = choice.get(role + "Effort") if choice.get(role + "Effort") in EFFORTS else None
         chosen = pick.get("effort")
         if model and stand_in and chosen not in EFFORTS:
             chosen = None  # A level only the user's own model has does not carry to its stand-in.
         worker = {"id": next_id(state, "w"), "token": secrets.token_hex(16), "role": role, "plan": plan, "task": task_id,
-                  "model": model or config["defaults"][role],
+                  "model": model or config["defaults"].get(role),
                   "effort": chosen or effort or config["defaults"][role + "Effort"],
-                  "modelSource": ("limit" if stand_in else "jev") if model else "default", "childThreadId": None,
+                  "modelSource": source, "childThreadId": None,
                   "taskIds": [], "state": "prepared", "job": None, "path": None}
         if pick.get("model") and not model:
             worker.update(model=pick["model"], modelSource="pick",
@@ -1002,24 +1040,25 @@ class Flow:
     def advise(self, config, state, role, context, lists, spent):
         """Jev's advice for one new worker, {} without any. Jev chooses an implementer's model where the user left it
         open, and its effort. A model the user picked, and a reviewer's or DevOps's, it replaces only while that model is
-        at its usage limit: then with an approved model of a provider that has capacity, marked "limit"."""
+        at its usage limit: then with an approved model of a provider that has capacity, marked "limit". A choice made
+        while a limit kept out an approved model T3 runs is marked "narrowed", so a restart after the reset asks again."""
         model, provider = usual(config, state, role)
         out = at_limit(spent, model, provider)
         picked = bool(((state.get("picks") or {}).get(role) or {}).get("model"))
         if not out and (role != "implementer" or picked):
             return {}
-        weighed = {**config, "models": {m: item for m, item in config["models"].items()
-                                        if runs(lists, m, item["provider"]) is not False
-                                        and not at_limit(spent, m, item["provider"])}}
+        able = {m: item for m, item in config["models"].items() if runs(lists, m, item["provider"]) is not False}
+        weighed = {**config, "models": {m: item for m, item in able.items() if not at_limit(spent, m, item["provider"])}}
+        narrowed = any(role in item.get("roles", []) for m, item in able.items() if m not in weighed["models"])
         if not any(role in item.get("roles", []) for item in weighed["models"].values()):
             return {}  # Nothing else can run, so the worker waits for the reset on its own model.
         try:
             choice = self.jev(weighed, context, role) or {}
             health.ok(self.path.parent, "jev")
-        except Exception as error:  # noqa: BLE001 - Jev is advice; the defaults stand in
+        except Exception as error:  # noqa: BLE001 - Jev is advice; add_worker starts the worker without it
             health.failed(self.path.parent, "jev", error)
             return {}
-        return {**choice, **({"limit": model} if out else {})}
+        return {**choice, **({"limit": model} if out else {"narrowed": True} if narrowed else {})}
 
     def delegate(self, config, state, worker, title, role, isolation, brief):
         call_id = f"{worker['id']}-start"

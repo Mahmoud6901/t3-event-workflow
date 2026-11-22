@@ -34,20 +34,21 @@ step 1:
 {"op":"models","projectId":"<T3 project id>","threadId":"<this thread's id>","search":"<words>"}
 ```
 
-- If `known` is false, tell the user its `reason` and go on: every role keeps its default model, and
-  only efforts can be chosen.
+- If `known` is false, tell the user its `reason` and go on: no model can be picked, only efforts.
 - Otherwise tell the user which `providers` T3 can run, and why any other cannot. If none is ready,
   stop: T3 needs Claude, Codex, goose or Antigravity enabled and signed in.
 - Then, for the implementer, the reviewer and DevOps in turn, show the role's default model and
-  effort from `defaults`, and ask for a model, an effort, both, or a skip. When its `runs` is false,
-  this T3 cannot run the default, so the user picks a model; `init` refuses that role without one.
+  effort from `defaults`, and ask for a model, an effort, both, or a skip. The implementer has no
+  default model: Jev chooses one per task, and without Jev's answer it runs on the best-scored approved
+  model T3 runs, its `fallback`. When `runs` is false, this T3 cannot run the default (for the
+  implementer, any approved model), so the user picks a model; `init` refuses that role without one.
 - Search with the user's words and show the matches with their `provider`; `more` counts the ones not
   shown. Offer only a model the list returned.
 - Offer the efforts in the chosen model's `efforts` (none when it is empty). Without a chosen model,
   offer low, medium, high, xhigh or max.
-- A role runs on the model and effort the user chose. For an implementer's model and effort they
-  skipped, Jev may advise among the models this T3 runs; else the default applies. A reviewer and
-  DevOps run on the user's choice, else the default.
+- A role runs on the model and effort the user chose. Jev chooses an implementer's model and effort
+  they skipped, among the models this T3 runs; without its answer, the `fallback` model at the default
+  effort. A reviewer and DevOps run on the user's choice, else the default.
 - While T3 shows a model's usage limit as spent, Jev starts that role's new workers on an approved
   model of another provider, over the user's choice too, until the limit resets.
 
@@ -90,7 +91,7 @@ In Codex's PowerShell, pipe a here-string instead, and keep the JSON ASCII (writ
 | `requiredChecks` | The CI check names that must pass before a merge |
 | `checks` | Local checks `worker pr` runs, each `{"name","argv","cwd","timeoutSeconds"}`. Give `argv` as a list, not shell text; `cwd` is relative to the project folder. |
 | `noChecksReason` | Why there are no local checks, when `checks` is empty |
-| `defaults` | Models and efforts without the user's choice or Jev's answer: implementer GPT-6.2-Sol and reviewer Opus 5.5, each at `xhigh`; DevOps Sonnet 5.5 at `high` |
+| `defaults` | Models and efforts without the user's choice or Jev's answer: reviewer Opus 5.5 at `xhigh`, DevOps Sonnet 5.5 at `high`, and the implementer's effort `xhigh`. The implementer has no default model. |
 | `quietMinutes` | Minutes before the watcher reports a quiet worker (default 30) |
 | `picks` | The user's model and effort per role, from step 2 |
 | `devops` | `false` merges without a DevOps worker (default `true`), from step 2 |
