@@ -112,7 +112,8 @@ class PartsReportTests(unittest.TestCase):
 
         self.op(down, "init", workspace=str(self.state / "app"), repo="owner/app", requiredChecks=["acceptance"], noChecksReason="Test")
         self.op(down, "control", action="activate", authorization="Go.")
-        self.op(down, "queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": f"Task {n}"} for n in range(3)]}])
+        self.op(down, "queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": f"Task {n}"} for n in range(3)]}],
+                noSpec="No spec.")
         self.assertEqual(len(self.op(down, "next")["calls"]), 3, "the defaults stand in")
         (problem,) = health.problems(self.state)
         self.assertEqual((problem["part"], problem["failures"]), ("jev", 3))

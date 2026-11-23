@@ -1951,7 +1951,7 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(self.orchestrator("queue_set", plans=[
             {"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo", "brief": "Fix it."}]},
             {"plan": "M31", "owns": ["src/"], "dependsOn": ["M30"], "tasks": [{"task": "Add a footer", "brief": "Add it."}]},
-        ])["ok"])
+        ], noSpec="No spec for these.")["ok"])
         (first,) = self.start()
         self.assertIn("Fix the login typo", first["arguments"]["task"])
         refused = self.orchestrator("queue_edit", plan="M31", dependsOn=[])
@@ -2100,7 +2100,7 @@ class FlowTests(unittest.TestCase):
                 {"task": "Fix the login typo", "brief": "Fix it."},
                 {"task": "Use the new name", "brief": "Use it.", "after": ["Fix the login typo"]}]},
             {"plan": "M31", "owns": ["src/"], "dependsOn": ["M30"], "tasks": [{"task": "Add a footer", "brief": "Add it."}]},
-        ])["ok"])
+        ], noSpec="No spec for these.")["ok"])
         for edit in ({"task": "Fix the login typo", "after": ["Fix the login typo"]},
                      {"task": "Fix the login typo", "after": ["Use the new name"]},
                      {"task": "Fix the login typo", "after": ["Add a footer"]},
@@ -2127,7 +2127,7 @@ class FlowTests(unittest.TestCase):
                 {"task": "Fix the login typo", "brief": "Fix it."},
                 {"task": "Use the new name", "brief": "Use it.", "after": ["Fix the login typo"]}]},
             {"plan": "M31", "owns": ["src/"], "dependsOn": ["M30"], "tasks": [{"task": "Add a footer", "brief": "Add it."}]},
-        ])["ok"])
+        ], noSpec="No spec for these.")["ok"])
         status = self.status()
         names = {t["id"]: t["task"] for t in status["tasks"]}
         self.assertEqual({t["task"]: [names[a] for a in t["after"]] for t in status["tasks"]},
@@ -2358,6 +2358,27 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(self.orchestrator("spec", plan="M31", request=self.REQUEST)["ok"])
         self.start()
         self.assertEqual(self.last_done["tell"], ["Lead for plan M31 started on claude-opus-5-5 at max (your choice)."])
+
+    def test_the_orchestrator_writes_more_than_one_task_only_from_an_approved_spec_or_on_the_users_words(self):
+        self.bind()
+        two = [{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "A", "brief": "Do A."}, {"task": "B", "brief": "Do B."}]}]
+        refused = self.orchestrator("queue_set", plans=two)
+        self.assertFalse(refused["ok"])
+        self.assertIn("This adds 2 tasks", refused["error"])
+        self.assertIn('{"op":"spec","plan":"<plan>","request":"<the user\'s words>"}', refused["error"])
+        across = [{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "A", "brief": "Do A."}]},
+                  {"plan": "M32", "owns": ["lib/"], "tasks": [{"task": "B", "brief": "Do B."}]}]
+        self.assertFalse(self.orchestrator("queue_set", plans=across)["ok"], "across plans too")
+        self.assertFalse(self.orchestrator("queue_set", plans=two, noSpec=" ")["ok"], "the user's own words, not blank")
+        self.assertEqual(self.status()["tasks"], [])
+        self.assertTrue(self.orchestrator("queue_set", plans=[{**two[0], "tasks": two[0]["tasks"][:1]}])["ok"], "one task goes in")
+        edit = self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "B", "brief": "Do B."}, {"task": "C", "brief": "C."}])
+        self.assertFalse(edit["ok"])
+        self.assertIn("This adds 2 tasks", edit["error"])
+        self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "B", "brief": "Do B."}])["ok"])
+        self.assertTrue(self.orchestrator("queue_edit", plans=across[1:], plan="M30", tasks=[{"task": "C", "brief": "C."}],
+                                          noSpec="No spec, just add them.")["ok"])
+        self.assertEqual([t["task"] for t in self.status()["tasks"]], ["A", "B", "B", "C"])
 
     def test_a_binding_an_earlier_version_made_gets_the_leads_default(self):
         self.bind()

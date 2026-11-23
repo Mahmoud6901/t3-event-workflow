@@ -31,6 +31,8 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
     A call stays in `calls` until `done` records it.
   - `tell`: lines for the user.
   - `ask`: questions for the user, each with an `id`, a `question` and, if it has them, `options`.
+- **queue_set** and **queue_edit** refuse a call that adds more than one task, across its plans, unless
+  it carries the user's own words to skip the spec as `noSpec`.
 - **queue_set** starts a queue when none is running. Rules for its tasks:
   - `owns` lists the paths a plan's tasks may change; a task can narrow it with its own `owns`.
   - A task waits for its `after` tasks to merge and its plan's `dependsOn` plans to finish. The rest

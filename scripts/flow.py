@@ -918,9 +918,23 @@ class Flow:
         count = len(draft["tasks"])
         state["tell"].append(f"Plan {spec['plan']} is queued from its approved spec: {count} task{'s' if count != 1 else ''}.")
 
+    @staticmethod
+    def one_task(req):
+        """The orchestrator writes one task at a time. A call that adds more, in one plan or across plans, is the lead's
+        work, unless the user's own words to skip the spec come as noSpec. An approved spec's plan never comes here."""
+        plans = req.get("plans") if isinstance(req.get("plans"), list) else []
+        count = sum(len(p.get("tasks") or []) for p in plans if isinstance(p, dict))
+        count += len(req.get("tasks") or []) if isinstance(req.get("tasks"), list) else 0
+        if count > 1:
+            require(isinstance(req.get("noSpec"), str) and req["noSpec"].strip(), (
+                f"This adds {count} tasks. Work of more than one task goes to the lead, which writes a spec for the user "
+                "to approve: run {\"op\":\"spec\",\"plan\":\"<plan>\",\"request\":\"<the user's words>\"}. Only if the "
+                "user said to skip the spec, pass their words as noSpec."))
+
     def queue_set(self, project, req):
         plans = req.get("plans")
         require(isinstance(plans, list) and plans, "plans lists at least one plan")
+        self.one_task(req)
 
         def change(config, state):
             require(not any(t["state"] in OPEN for t in state["tasks"].values()), "A queue is running; add to it with queue_edit")
@@ -957,6 +971,8 @@ class Flow:
     def queue_edit(self, project, req):
         """Change a running queue: new plans, new tasks for a plan (a done plan opens again), drop a task, or relink:
         replace a waiting task's `after` or a plan's `dependsOn`, unless that makes a loop."""
+        self.one_task(req)
+
         def change(config, state):
             result = {}
             for plan in req.get("plans") or []:

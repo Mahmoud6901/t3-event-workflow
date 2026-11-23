@@ -52,6 +52,7 @@ resume only on the user's own words (`control`), and pass those words as `author
 |---|---|
 | An answer to an `ask` | `answer` with its id and their words, one of its `options` when it has them |
 | "Spec this" | `spec` with the plan and the request |
+| "No spec" for work of several tasks | `queue_set` or `queue_edit` with their words as `noSpec` |
 | "Restart <task>" (or the lead) | `restart` with their words as `authorization` (`spec` for the lead) |
 | "Drop <task>" | `queue_edit` with `drop` |
 | "Start <task> now", "<task> doesn't need <other>" | `queue_edit` with its new `after` (or its plan's `dependsOn`) and `why` |
