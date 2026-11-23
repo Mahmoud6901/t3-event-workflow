@@ -42,6 +42,8 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
 - **answer** answers an `ask`:
   - A PR that changes files outside its task's paths takes `merge`, `back` (to its implementer) or
     `drop`.
+  - After 3 review rounds: `carry on`, `restart` (a new implementer, on another model unless the
+    implementer's model is picked) or `drop`.
   - A stuck implementer's question takes the user's own words, which are sent to it.
 - **restart** replaces the worker that holds a task (an implementer, reviewer or DevOps) with a new one
   in the same role.
@@ -69,7 +71,7 @@ The hook runs `ended` for each "Delegated task …" notice; you never do.
 | `review_needed` | A PR commit waits for review | `next` starts a reviewer |
 | `reviewing` | A reviewer reads it | `worker review` |
 | `approved` | `t3/review` is on the reviewed commit | `next` applies the rule below |
-| `asking` | The PR changes files outside its paths | Your `answer` |
+| `asking` | The PR changes files outside its paths, or 3 review rounds asked for changes | Your `answer` |
 | `ci_failed` | CI failed on the approved commit | DevOps triages it |
 | `confirmed` | Ready to merge | `worker take` |
 | `merging` | DevOps holds it (or `next`, without DevOps) | `worker merge`, `worker failed`, `worker update` |
@@ -84,7 +86,8 @@ The hook runs `ended` for each "Delegated task …" notice; you never do.
 - Otherwise the task is `confirmed`.
 
 A review asking for changes, a conflict, a failed CI check in the task's code, or your `back` sends
-the task back to its implementer, with a follow-up naming the fix.
+the task back to its implementer, with a follow-up naming the fix. A task's third review asking for
+changes, counted from your last answer, asks you instead.
 
 **A worker that ends without its closing command** gets one follow-up asking it to finish. If it ends
 that way again, its task is `blocked`, and `tell` says so. One stopped at its quota is replaced at

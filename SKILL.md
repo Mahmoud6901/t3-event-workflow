@@ -27,6 +27,9 @@ A task merges only when all of these hold:
 - GitHub's protection on the main branch passes: the required checks and `t3/review` are green on an
   up-to-date branch
 
+A task whose reviewer asked for changes 3 times waits for the user: it carries on with its implementer,
+restarts with a new one, or is dropped.
+
 [harness.py](scripts/harness.py) owns every transition, and the binding lives in `state/`. Finished
 workers wake the orchestrator. One background process runs: the watcher, which reports workers that
 have been quiet too long.

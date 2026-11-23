@@ -49,6 +49,8 @@ DEFAULTS = {"implementerEffort": "xhigh", "reviewer": "claude-opus-5-5", "review
             "devops": "claude-sonnet-5-5", "devopsEffort": "high"}  # No implementer model: Jev chooses it, else best_scored.
 QUIET_MINUTES = 30
 NUDGES = 1  # Follow-ups asking a worker that ended without its closing command to finish; then the task is blocked.
+REVIEW_ROUNDS = 3  # Reviews asking for changes before the user decides how the task goes on.
+ROUND_OPTIONS = ["carry on", "restart", "drop"]
 OPEN = ("waiting", "ready", "implementing", "review_needed", "reviewing", "approved", "asking", "confirmed",
         "merging", "ci_failed", "pipeline_wait", "blocked")
 
@@ -332,6 +334,11 @@ def devops_on(state, name):
 def ci_checks(config, state):
     """The CI checks a merge waits for: none while the user has CI off."""
     return config["github"]["requiredChecks"] if state.get("ciOn", True) else []
+
+
+def review_fix(task):
+    """What the implementer is told when the reviewer asked for changes."""
+    return {"kind": "review", "detail": f"The reviewer asked for changes on PR #{task['pr']}."}
 
 
 def update_fix(config, outcome, number):
@@ -1008,17 +1015,32 @@ class Flow:
             self.move(task, "ci_failed" if task.get("job") == "triage" else "confirmed", why)
 
     def answer(self, project, req):
-        """Your answer to a question from `ask`: merge, back or drop for a PR outside its paths; any words for a
-        stuck implementer, which get sent to it."""
+        """Your answer to a question from `ask`: merge, back or drop for a PR outside its paths; carry on, restart or
+        drop for a task after its review rounds; any words for a stuck implementer, which get sent to it."""
         ask_id, reply = text(req.get("ask"), "ask"), text(req.get("answer"), "answer")
+        config, state = self.load(project)
+        asked = state["asks"].get(ask_id) or {}
+        advice = {}
+        if asked.get("kind") == "rounds" and reply == "restart" and not asked.get("answered"):
+            advice = self.other_model(config, state, state["tasks"][asked["task"]])
 
         def change(config, state):
             ask = state["asks"].get(ask_id)
             require(ask and not ask.get("answered"), f"No open question {ask_id}")
             task = state["tasks"][ask["task"]]
-            if ask["kind"] == "outside":
+            if ask["kind"] in {"outside", "rounds"}:
                 require(reply in ask["options"], f"Answer {ask_id} with {', '.join(ask['options'])}")
                 require(task["state"] == "asking", f"{task['id']} is no longer waiting for this answer")
+            if ask["kind"] == "rounds":
+                task["rounds"] = 0  # The count starts again from the user's answer.
+                if reply == "carry on":
+                    task["fix"] = review_fix(task)
+                    self.move(task, "implementing", "you said carry on")
+                elif reply == "restart":
+                    self.take_over(config, state, task, advice)
+                else:
+                    self.drop(state, task, "you dropped it")
+            elif ask["kind"] == "outside":
                 if reply == "merge":
                     self.move(task, "confirmed", "you said merge")
                 elif reply == "back":
@@ -1036,6 +1058,50 @@ class Flow:
             ask["answered"] = reply
             return {"task": task["id"], "state": task["state"]}
         return self.transact(project, change, "answer")
+
+    def ask_rounds(self, state, task):
+        """The reviewer asked for changes REVIEW_ROUNDS times since the user last decided: the task waits for them."""
+        ask_id = next_id(state, "a")
+        state["asks"][ask_id] = {"id": ask_id, "task": task["id"], "kind": "rounds", "question": (
+            f"The reviewer asked for changes on PR #{task['pr']} ({task['task']}) {REVIEW_ROUNDS} times. Carry on with "
+            f"its implementer for {REVIEW_ROUNDS} more rounds, restart it with a new implementer, or drop it?"),
+            "options": list(ROUND_OPTIONS)}
+        self.move(task, "asking", f"{REVIEW_ROUNDS} review rounds asked for changes")
+        state["tell"].append(f"{task['task']} ({task['plan']}) stopped after {REVIEW_ROUNDS} review rounds: each asked "
+                             f"for changes.")
+
+    def take_over(self, config, state, task, advice):
+        """A new implementer takes the task after its review rounds, told why its PR came back. The author of a
+        pipeline fix is its plan's DevOps worker, which stays."""
+        old = state["workers"].get(task.get("implementer"))
+        if old and old["role"] == "implementer":
+            self.retire(state, old, "replaced after its review rounds")
+        task.pop("fix", None)
+        task["returned"] = (f"The reviewer asked for changes on PR #{task['pr']} {REVIEW_ROUNDS} times, and the user gave "
+                            f"the task to a new implementer.")
+        self.start_implementer(config, state, task, advice)
+
+    def other_model(self, config, state, task):
+        """Advice for the new implementer that takes a task after its review rounds. Where the user left the model
+        open, it runs on another model than the one that held the task: Jev's choice among the approved models T3 runs
+        with capacity, else the best scored of them. With the user's model, or no other to run on, the usual advice."""
+        lists, spent = t3_lists()[0], limits_now(state)
+        last = (state["workers"].get(task.get("implementer")) or {}).get("model")
+        others = {m: item for m, item in config["models"].items()
+                  if m != last and runs(lists, m, item["provider"]) is not False and not at_limit(spent, m, item["provider"])}
+        able = [m for m, item in others.items() if "implementer" in item.get("roles", [])]
+        if ((state.get("picks") or {}).get("implementer") or {}).get("model") or not able:
+            return self.advise(config, state, "implementer", described(task), lists, spent)
+        weighed = {**config, "models": others}
+        try:
+            choice = self.jev(weighed, described(task), "implementer") or {}
+            health.ok(self.path.parent, "jev")
+        except Exception as error:  # noqa: BLE001 - Jev is advice; the best-scored other model starts without it
+            health.failed(self.path.parent, "jev", error)
+            choice = {}
+        if choice.get("implementer") not in able:
+            choice = {"implementer": best_scored(weighed, "implementer", lists, spent), "source": "scores"}
+        return choice
 
     def drop(self, state, task, note):
         """The task ends unmerged: its unmade calls are withdrawn, its workers still on it are cancelled."""
@@ -1143,7 +1209,7 @@ class Flow:
         stand_in = bool(choice.get("limit"))
         advised = choice.get(role) if role in (config["models"].get(choice.get(role)) or {}).get("roles", []) else None
         model = advised if stand_in or not pick.get("model") else None
-        source = ("limit" if stand_in else "jev") if model else "default"
+        source = ("limit" if stand_in else choice.get("source", "jev")) if model else "default"
         own, provider = usual(config, state, role)
         spent = limits_now(state) if not model else {}
         if not model and (not own or at_limit(spent, own, provider)):
@@ -1503,8 +1569,12 @@ class Flow:
                 task["approvedSha"] = sha
                 self.move(task, "approved", f"t3/review on {sha[:12]}")
             else:
-                task["fix"] = {"kind": "review", "detail": f"The reviewer asked for changes on PR #{task['pr']}."}
-                self.move(task, "implementing", "changes requested")
+                task["rounds"] = task.get("rounds", 0) + 1
+                if task["rounds"] >= REVIEW_ROUNDS:
+                    self.ask_rounds(state, task)
+                else:
+                    task["fix"] = review_fix(task)
+                    self.move(task, "implementing", "changes requested")
             return {"state": task["state"], "next": "End your turn."}
         return self.transact(project, change, "review")
 

@@ -836,9 +836,10 @@ class FlowTests(unittest.TestCase):
         self.assertFalse(wrong["ok"])
         self.assertIn("token", wrong["error"])
 
-    def to_review(self, content="export const name = 1;\n", number=7, files=("src/login.ts",), owns=("src/",), devops=None):
+    def to_review(self, content="export const name = 1;\n", number=7, files=("src/login.ts",), owns=("src/",), devops=None,
+                  **binding):
         """One task queued, implemented and in review. Returns (implementer call, reviewer call, worktree)."""
-        self.bind(**({} if devops is None else {"devops": devops}))
+        self.bind(**({} if devops is None else {"devops": devops}), **binding)
         self.queue("Fix the login typo", owns=owns)
         (call,) = self.start()
         worker, token, tree = self.implement(call, content, number, files)
@@ -1273,6 +1274,81 @@ class FlowTests(unittest.TestCase):
 
     def test_dropping_the_last_task_ends_its_plan(self):
         _, ask = self.outside()
+        self.assertTrue(self.orchestrator("answer", ask=ask["id"], answer="drop")["ok"])
+        step = self.orchestrator("next")
+        self.assertEqual(step["calls"], [])
+        self.assertIn("Plan M30 done: 0 merged, 1 dropped.", step["tell"])
+
+    def rounds(self, call, review, tree, count, number=7):
+        """count reviews in a row ask for changes; the implementer pushes a fix after each but the last. Returns the
+        last reviewer call."""
+        for round_ in range(1, count + 1):
+            self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "changes",
+                                        "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
+            if round_ == count:
+                return review
+            (fix,) = self.start()
+            self.assertEqual(fix["tool"], "t3_thread_send")
+            worker, token, tree = self.implement(call, f"export const name = 'round {round_}';\n", number)
+            self.assertTrue(self.worker("pr", worker, token, "--pr", str(number), path=tree)["ok"])
+            (review,) = self.start()
+
+    def rounds_ask(self, **kwargs):
+        """A task whose third review asked for changes. Returns (implementer call, worktree, ask)."""
+        call, review, tree = self.to_review(**kwargs)
+        self.rounds(call, review, tree, 3)  # The first two go back to the implementer as before.
+        step = self.orchestrator("next")
+        self.assertEqual(step["calls"], [], "the third round does not go back to its implementer")
+        self.assertIn("Fix the login typo (M30) stopped after 3 review rounds: each asked for changes.", step["tell"])
+        (ask,) = step["ask"]
+        self.assertEqual(ask["options"], ["carry on", "restart", "drop"])
+        self.assertIn("PR #7", ask["question"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["asking"])
+        return call, tree, ask
+
+    def test_after_three_review_rounds_carry_on_sends_it_back_and_the_count_starts_again(self):
+        call, tree, ask = self.rounds_ask()
+        self.assertFalse(self.orchestrator("answer", ask=ask["id"], answer="merge")["ok"])
+        self.assertTrue(self.orchestrator("answer", ask=ask["id"], answer="carry on")["ok"])
+        (fix,) = self.start()
+        self.assertEqual((fix["tool"], fix["arguments"]["threadId"]), ("t3_thread_send", f"child-{worker_command(call)[0]}"))
+        self.assertIn("asked for changes", fix["arguments"]["message"])
+        worker, token, tree = self.implement(call, "export const name = 'again';\n", 7)
+        self.assertTrue(self.worker("pr", worker, token, "--pr", "7", path=tree)["ok"])
+        (review,) = self.start()
+        self.rounds(call, review, tree, 2)
+        step = self.orchestrator("next")
+        self.assertEqual(step["ask"], [], "two more rounds after carry on go back without asking")
+        self.assertEqual([c["tool"] for c in step["calls"]], ["t3_thread_send"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
+
+    def test_after_three_review_rounds_restart_gives_the_pr_to_a_new_implementer_on_another_model(self):
+        call, tree, ask = self.rounds_ask()
+        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra")
+        self.assertTrue(self.orchestrator("answer", ask=ask["id"], answer="restart")["ok"])
+        cancel, fresh = self.start()  # The old implementer's run had not ended here, so it is cancelled.
+        self.assertEqual((cancel["tool"], cancel["worker"]), ("task_cancel", call["worker"]))
+        self.assertEqual(fresh["tool"], "delegate_task")
+        self.assertNotEqual(fresh["worker"], call["worker"])
+        self.assertEqual(fresh["arguments"]["target"]["model"], "gemini-4-neon",
+                         "Jev named the model that held it, so the best-scored other one runs")
+        self.assertNotIn("gpt-6.2-astra", self.jev_models, "Jev weighs only the other models")
+        brief = fresh["arguments"]["task"]
+        self.assertIn("PR #7 already holds this task's work", brief)
+        self.assertIn("It came back because: The reviewer asked for changes on PR #7 3 times", brief)
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
+
+    def test_after_three_review_rounds_restart_keeps_the_implementer_model_the_user_picked(self):
+        self.t3_caches()
+        call, tree, ask = self.rounds_ask(picks={"implementer": "gpt-6.2-sol"})
+        self.assertTrue(self.orchestrator("answer", ask=ask["id"], answer="restart")["ok"])
+        cancel, fresh = self.start()  # The old implementer's run had not ended here, so it is cancelled.
+        self.assertEqual((cancel["tool"], cancel["worker"]), ("task_cancel", call["worker"]))
+        self.assertNotEqual(fresh["worker"], call["worker"])
+        self.assertEqual(fresh["arguments"]["target"]["model"], "gpt-6.2-sol")
+
+    def test_after_three_review_rounds_drop_ends_the_task(self):
+        _, _, ask = self.rounds_ask()
         self.assertTrue(self.orchestrator("answer", ask=ask["id"], answer="drop")["ok"])
         step = self.orchestrator("next")
         self.assertEqual(step["calls"], [])

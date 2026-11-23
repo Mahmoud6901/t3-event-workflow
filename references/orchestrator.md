@@ -58,7 +58,7 @@ plan you wrote: what starts now, and what each waiting task builds on.
 
 | The user says | You run |
 |---|---|
-| An answer to an `ask` | `answer` with its id and their words (`merge`, `back` or `drop` for a PR outside its paths) |
+| An answer to an `ask` | `answer` with its id and their words, one of its `options` when it has them |
 | "Restart <task>" | `restart` with their words as `authorization` |
 | "Drop <task>" | `queue_edit` with `drop` |
 | "Start <task> now", "<task> doesn't need <other>" | `queue_edit` with its new `after` (or its plan's `dependsOn`) and `why` |
