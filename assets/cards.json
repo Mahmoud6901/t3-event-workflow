@@ -1,0 +1,346 @@
+{
+  "about": "One card per approved model: what it is good and weak at in coding-agent work, condensed from independent boards and, marked so, its maker's claims. Jev reads them; README.md says how to refresh them.",
+  "models": {
+    "claude-fable-5-2": {
+      "maker": "Anthropic",
+      "read": "2026-11-23",
+      "good_at": [
+        "long autonomous multi-step work (LiveBench Long Agentic)",
+        "rebuilding whole programs from a spec (Vals ProgramBench)",
+        "building a web app from scratch, and large language migrations (Vals)",
+        "turning ambiguous requests into good results (maker's claim)"
+      ],
+      "weak_at": [
+        "heavy token use: about twice Opus 5.5's for the same Terminal-Bench score",
+        "short bug fixes from real PRs, below its other suites (LiveBench Coding)",
+        "slow per coding task (LiveBench timing)"
+      ],
+      "sources": [
+        "https://platform.claude.com/docs/en/models/overview",
+        "https://www.anthropic.com/claude-fable-and-mythos-5-2",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://livebench.ai/data/20261106/llm_time.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code",
+        "https://www.vals.ai/benchmarks/code-migration-v1-1",
+        "https://www.vals.ai/benchmarks/swebench-multimodal",
+        "https://www.vals.ai/benchmarks/programbench"
+      ]
+    },
+    "claude-opus-5-5": {
+      "maker": "Anthropic",
+      "read": "2026-11-23",
+      "good_at": [
+        "bug fixes from real merged PRs (LiveBench Coding)",
+        "front-end fixes reported with screenshots (Vals SWE-bench Multimodal)",
+        "multi-step terminal tasks (Terminal-Bench)",
+        "large codebase migrations (Vals Code Migration)"
+      ],
+      "weak_at": [
+        "extending a working app through many dependent requests: low score, slow (Vals)",
+        "the hardest bug fixes (LiveBench Hard Fixes)",
+        "weeks-long delegated operations (LiveBench)"
+      ],
+      "sources": [
+        "https://platform.claude.com/docs/en/models/overview",
+        "https://www.anthropic.com/claude-opus-5-5",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://livebench.ai/data/20261014/table.csv",
+        "https://livebench.ai/v1/table_2026_06_25.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code",
+        "https://www.vals.ai/benchmarks/vcb-1-100-v1-1",
+        "https://www.vals.ai/benchmarks/code-migration-v1-1",
+        "https://www.vals.ai/benchmarks/swebench-multimodal",
+        "https://www.vals.ai/benchmarks/programbench"
+      ]
+    },
+    "claude-sonnet-5-5": {
+      "maker": "Anthropic",
+      "read": "2026-11-23",
+      "good_at": [
+        "rewriting programs in another language (Vals Code Migration)",
+        "building a web app from scratch (Vals Vibe Code)",
+        "multi-step terminal tasks (Terminal-Bench)",
+        "well-scoped everyday tasks and bug fixes (maker's claim)"
+      ],
+      "weak_at": [
+        "hard bug fixes (LiveBench Hard Fixes)",
+        "weeks-long delegated operations (LiveBench)",
+        "heavy token use on terminal tasks (Terminal-Bench, Vals)",
+        "complex open-ended work that needs sustained judgment (maker's claim)"
+      ],
+      "sources": [
+        "https://platform.claude.com/docs/en/models/overview",
+        "https://www.anthropic.com/claude-sonnet-5-5",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://livebench.ai/data/20261014/table.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code",
+        "https://www.vals.ai/benchmarks/code-migration-v1-1",
+        "https://www.vals.ai/benchmarks/swebench-multimodal",
+        "https://www.vals.ai/benchmarks/programbench"
+      ]
+    },
+    "gpt-6.2-astra": {
+      "maker": "OpenAI",
+      "read": "2026-11-23",
+      "good_at": [
+        "extending a working app through many dependent requests (Vals Vibe Code 1-100)",
+        "bug fixes from real merged PRs, product and UX ones too (LiveBench Coding)",
+        "light token use on agent runs (Terminal-Bench, Vals)",
+        "implementing and testing complex changes in existing code (maker's claim)"
+      ],
+      "weak_at": [
+        "long-run operations (LiveBench)",
+        "the hardest bug fixes (LiveBench Hard Fixes)",
+        "may stop to propose a next step and wait when intent is unclear (maker's claim)"
+      ],
+      "sources": [
+        "https://developers.openai.com/api/docs/models/gpt-6.2-astra",
+        "https://openai.com/index/introducing-gpt-6-2-astra-sol/",
+        "https://developers.openai.com/api/docs/guides/latest-model",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://livebench.ai/data/20261106/llm_time.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code",
+        "https://www.vals.ai/benchmarks/vcb-1-100-v1-1"
+      ]
+    },
+    "gpt-6.2-sol": {
+      "maker": "OpenAI",
+      "read": "2026-11-23",
+      "good_at": [
+        "fast per task (Vals Terminal-Bench, LiveBench timing)",
+        "multi-step terminal tasks (Terminal-Bench)",
+        "extending a working app (Vals Vibe Code 1-100)",
+        "code changes close to Astra's in quality (maker's claim)"
+      ],
+      "weak_at": [
+        "hard bug fixes (LiveBench Hard Fixes)",
+        "long agentic work and weeks-long delegated operations (LiveBench)"
+      ],
+      "sources": [
+        "https://developers.openai.com/api/docs/models/gpt-6.2-sol",
+        "https://openai.com/index/introducing-gpt-6-2-astra-sol/",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://livebench.ai/data/20261106/llm_time.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code",
+        "https://www.vals.ai/benchmarks/vcb-1-100-v1-1"
+      ]
+    },
+    "gemini-4-neon": {
+      "maker": "Google",
+      "read": "2026-11-23",
+      "good_at": [
+        "long autonomous multi-step work (LiveBench Long Agentic)",
+        "building a web app from scratch, quickly (Vals Vibe Code)",
+        "browser and UI tasks (LiveBench Browser)",
+        "bug fixes from real PRs (LiveBench Coding)"
+      ],
+      "weak_at": [
+        "systems engineering, below its other long work (LiveBench)",
+        "the hardest bug fixes (LiveBench Hard Fixes)",
+        "new (2026-11-18): no migration or program-rebuild evidence yet"
+      ],
+      "sources": [
+        "https://ai.google.dev/gemini-api/docs/models/gemini-4-neon",
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-neon/",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://livebench.ai/data/20261106/llm_time.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code",
+        "https://www.vals.ai/benchmarks/vcb-1-100-v1-1"
+      ]
+    },
+    "gemini-4-argon": {
+      "maker": "Google",
+      "read": "2026-11-23",
+      "good_at": [
+        "building a web app from scratch (Vals Vibe Code)",
+        "front-end fixes reported with screenshots (Vals SWE-bench Multimodal)",
+        "large code migrations (Vals Code Migration)"
+      ],
+      "weak_at": [
+        "long agentic app work (LiveBench Long Agentic)",
+        "slow per task (LiveBench timing)",
+        "agent-loop coding tasks (LiveBench)",
+        "rebuilding programs from a spec (Vals ProgramBench)"
+      ],
+      "sources": [
+        "https://ai.google.dev/gemini-api/docs/models/gemini-4-argon",
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://livebench.ai/data/20261106/llm_time.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code",
+        "https://www.vals.ai/benchmarks/code-migration-v1-1",
+        "https://www.vals.ai/benchmarks/swebench-multimodal",
+        "https://www.vals.ai/benchmarks/programbench"
+      ]
+    },
+    "gemini-4-hydrogen": {
+      "maker": "Google",
+      "read": "2026-11-23",
+      "good_at": [
+        "quick app builds (Vals Vibe Code)",
+        "fast worker under a stronger planner: write, test, verify (maker's claim)",
+        "surgical edits that leave unrelated files alone (maker's claim)"
+      ],
+      "weak_at": [
+        "product and UX fixes, and hard fixes (LiveBench Coding)",
+        "weeks-long delegated operations (LiveBench)",
+        "multi-step terminal tasks (Terminal-Bench, Vals)"
+      ],
+      "sources": [
+        "https://ai.google.dev/gemini-api/docs/models/gemini-4-hydrogen",
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-hydrogen/",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://livebench.ai/data/20261106/llm_time.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code"
+      ]
+    },
+    "google/gemini-4-carbon": {
+      "maker": "Google",
+      "read": "2026-11-23",
+      "good_at": [
+        "bug fixes from real PRs, product and UX ones too (LiveBench Coding)",
+        "extending a working app through dependent requests (Vals Vibe Code 1-100)",
+        "multi-step terminal tasks (Terminal-Bench)",
+        "root-causing subtle bugs across large codebases (maker's claim)"
+      ],
+      "weak_at": [
+        "slow per task (LiveBench timing, Vals)",
+        "performance optimisation and delegated operations (LiveBench)",
+        "browser tasks (LiveBench Browser)"
+      ],
+      "sources": [
+        "https://openrouter.ai/api/v1/models",
+        "https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon",
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-carbon/",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://livebench.ai/data/20261106/llm_time.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code",
+        "https://www.vals.ai/benchmarks/vcb-1-100-v1-1"
+      ]
+    },
+    "deepseek/deepseek-v4.1-flash": {
+      "maker": "DeepSeek",
+      "read": "2026-11-23",
+      "good_at": [
+        "building a web app from scratch (Vals Vibe Code)",
+        "bug fixes from real PRs (LiveBench Coding, October release)",
+        "agentic coding on the older LiveBench 1.0"
+      ],
+      "weak_at": [
+        "multi-step terminal tasks (Vals Terminal-Bench)",
+        "long agentic work (LiveBench, October release)",
+        "rebuilding programs from a spec (Vals ProgramBench)"
+      ],
+      "sources": [
+        "https://openrouter.ai/api/v1/models",
+        "https://api-docs.deepseek.com/updates.md",
+        "https://livebench.ai/data/20261014/table.csv",
+        "https://livebench.ai/v1/table_2026_06_25.csv",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code",
+        "https://www.vals.ai/benchmarks/code-migration-v1-1",
+        "https://www.vals.ai/benchmarks/swebench-multimodal",
+        "https://www.vals.ai/benchmarks/programbench"
+      ]
+    },
+    "z-ai/glm-5.3-prime": {
+      "maker": "Z.ai",
+      "read": "2026-11-23",
+      "good_at": [
+        "bug fixes from real PRs, for base GLM-5.3 (LiveBench Coding, October release)",
+        "faster output than base GLM-5.3 with the same abilities (OpenRouter's description)",
+        "long-horizon software engineering, for base GLM-5.3 (maker's claim)"
+      ],
+      "weak_at": [
+        "multi-step terminal tasks, for base GLM-5.3 (Terminal-Bench, Vals)",
+        "long agentic work, for base GLM-5.3 (LiveBench, October release)",
+        "text only: no screenshots or browser tasks (maker's docs)"
+      ],
+      "sources": [
+        "https://openrouter.ai/api/v1/models",
+        "https://docs.z.ai/guides/llm/glm-5.3.md",
+        "https://livebench.ai/data/20261014/table.csv",
+        "https://livebench.ai/v1/table_2026_06_25.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code",
+        "https://www.vals.ai/benchmarks/vcb-1-100-v1-1",
+        "https://www.vals.ai/benchmarks/code-migration-v1-1",
+        "https://www.vals.ai/benchmarks/programbench"
+      ]
+    },
+    "moonshotai/kimi-k3.1-pro": {
+      "maker": "Moonshot AI",
+      "read": "2026-11-23",
+      "good_at": [
+        "multi-step terminal tasks (Terminal-Bench, Vals)",
+        "building a web app from scratch (Vals Vibe Code)",
+        "front-end and visual work (maker's claim)"
+      ],
+      "weak_at": [
+        "long agentic app work (LiveBench Long Agentic)",
+        "bug fixes from real PRs, product and UX ones most (LiveBench Coding)",
+        "the boards disagree on it: terminal boards high, LiveBench low"
+      ],
+      "sources": [
+        "https://openrouter.ai/api/v1/models",
+        "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://livebench.ai/data/20261014/table.csv",
+        "https://www.tbench.ai/leaderboard",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code"
+      ]
+    },
+    "qwen/qwen4-max": {
+      "maker": "Alibaba (Qwen)",
+      "read": "2026-11-23",
+      "good_at": [
+        "building a web app from scratch (Vals Vibe Code)",
+        "browser tasks (LiveBench Browser)",
+        "long-running agent runs (maker's claim)"
+      ],
+      "weak_at": [
+        "long-run operations (LiveBench)",
+        "bug fixes from real PRs (LiveBench Coding)",
+        "multi-step terminal tasks, slowly (Vals Terminal-Bench)"
+      ],
+      "sources": [
+        "https://openrouter.ai/api/v1/models",
+        "https://www.alibabacloud.com/press-room/alibaba-unveils-qwen4-max",
+        "https://livebench.ai/data/20261106/table.csv",
+        "https://livebench.ai/data/20261106/breakdown.json",
+        "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "https://www.vals.ai/benchmarks/vibe-code"
+      ]
+    }
+  }
+}

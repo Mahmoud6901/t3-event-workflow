@@ -22,7 +22,7 @@ class TaskAdviceTests(unittest.TestCase):
         payload = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task")
         self.assertEqual(set(payload["questions"]), {"implementer"})
         self.assertNotIn("effort", json.dumps(payload["questions"]).lower())
-        self.assertNotIn("claude-opus-5-5", payload["questions"]["implementer"]["criteria"])
+        self.assertNotIn("claude-fable-5-2", payload["questions"]["implementer"]["criteria"], "it has no role yet")
 
     def test_another_role_is_asked_for_its_model_alone_among_its_own_approved_ones(self):
         reviewer = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task", "reviewer")["questions"]

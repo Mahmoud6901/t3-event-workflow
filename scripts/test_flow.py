@@ -344,18 +344,56 @@ class FlowTests(unittest.TestCase):
         self.assertIn("gpt-6.2-astra", self.jev_models)
         self.assertFalse(set(retired) & set(self.jev_models), self.jev_models)
 
-    def bound_before_0_10(self):
-        """The binding as a version before GPT-6.2 Astra reviewed stored it: Opus 5.5 the reviewer's default, and Astra
-        approved for the implementer alone."""
-        self.stored_defaults(reviewer="claude-opus-5-5")
+    def stored_config(self, **changes):
+        """The binding's config as an older version stored it."""
         db = store.connect(self.db)
         try:
             with db:
                 config = json.loads(db.execute("SELECT config FROM projects WHERE id=?", (PROJECT,)).fetchone()[0])
-                config["models"]["gpt-6.2-astra"]["roles"] = ["implementer"]
+                config.update(changes)
                 db.execute("UPDATE projects SET config=? WHERE id=?", (store.packed(config), PROJECT))
         finally:
             db.close()
+
+    def loaded_models(self):
+        engine = flow.Flow(self.db)
+        try:
+            return engine.load(PROJECT)[0]["models"]
+        finally:
+            engine.close()
+
+    def test_only_a_model_with_a_card_is_approved_each_in_its_roles(self):
+        self.assertEqual(set(jev.cards()), set(flow.MODELS), "every shipped model has a card, and every card a model")
+        self.assertEqual(set(flow.approved()), set(flow.MODELS))
+        roles = {role: sorted(m for m, item in flow.approved().items() if role in item["roles"]) for role in flow.ROLES}
+        self.assertEqual(roles["implementer"], sorted(set(flow.MODELS) - {"claude-fable-5-2"}))
+        self.assertEqual(roles["reviewer"], sorted(["gpt-6.2-astra", "claude-opus-5-5", "claude-sonnet-5-5", "gemini-4-neon",
+                                                    "google/gemini-4-carbon"]))
+        self.assertEqual(roles["devops"], sorted(["claude-sonnet-5-5", "claude-opus-5-5", "gemini-4-neon"]))
+        for model, card in jev.cards().items():
+            with self.subTest(model):
+                self.assertTrue(2 <= len(card["good_at"]) <= 4 and 2 <= len(card["weak_at"]) <= 4, card)
+                self.assertTrue(card["maker"] and card["read"] and card["sources"])
+        with patch.object(jev, "cards", return_value={m: c for m, c in jev.cards().items() if m != "qwen/qwen4-max"}):
+            self.assertNotIn("qwen/qwen4-max", flow.approved(), "a model without a card is never offered")
+
+    def test_an_older_binding_picks_up_the_approved_list_with_the_models_that_came_back(self):
+        self.bind()
+        self.stored_config(models={"gpt-6.2-sol": {"provider": "codex", "roles": ["implementer"]},
+                                   "made-up/model": {"provider": "codex", "roles": ["implementer", "reviewer"]}},
+                           defaults={**flow.DEFAULTS, "reviewer": "made-up/model"})
+        models = self.loaded_models()
+        self.assertEqual(set(models), set(flow.MODELS))
+        for model in ("deepseek/deepseek-v4.1-flash", "z-ai/glm-5.3-prime", "moonshotai/kimi-k3.1-pro"):
+            self.assertIn("implementer", models[model]["roles"])
+        self.assertEqual(self.status()["models"]["reviewer"]["model"], "gpt-6.2-astra", "a default without a card gives way")
+
+    def bound_before_0_10(self):
+        """The binding as a version before GPT-6.2 Astra reviewed stored it: Opus 5.5 the reviewer's default, and Astra
+        approved for the implementer alone."""
+        self.stored_defaults(reviewer="claude-opus-5-5")
+        self.stored_config(models={"gpt-6.2-astra": {"provider": "codex", "roles": ["implementer"]},
+                                   "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]}})
 
     def test_gpt_6_2_astra_is_the_default_reviewer_and_an_older_bindings_shipped_default_moves_to_it(self):
         self.t3_caches()

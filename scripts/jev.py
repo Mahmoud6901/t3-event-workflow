@@ -26,7 +26,18 @@ ROLES = ("implementer", "reviewer", "devops")
 PROVIDER_LABELS = {"codex": "OpenAI via Codex", "claudeAgent": "Anthropic via Claude", "acpRegistry_goose": "OpenRouter via goose",
                    "antigravity": "Google via Antigravity"}
 SCORES_FILE = Path(__file__).resolve().parent.parent / "assets" / "scores.json"  # Refreshed by scores.py.
+CARDS_FILE = Path(__file__).resolve().parent.parent / "assets" / "cards.json"  # One ability card per approved model.
 USE_WINDOWS_CURL = os.name == "nt"
+
+
+def cards():
+    """The shipped ability cards, {model: {"maker", "read", "good_at", "weak_at", "sources"}}; {} when they cannot be
+    read. A model without a card is never offered."""
+    try:
+        found = json.loads(CARDS_FILE.read_text(encoding="utf-8")).get("models")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return {m: card for m, card in found.items() if isinstance(card, dict)} if isinstance(found, dict) else {}
 
 
 def _eligible(config, role):

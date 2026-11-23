@@ -27,43 +27,6 @@
     "devops": "claude-sonnet-5-5",
     "devopsEffort": "high"
   },
-  "models": {
-    "gpt-6.2-sol": {
-      "provider": "codex",
-      "roles": [
-        "implementer"
-      ]
-    },
-    "gpt-6.2-astra": {
-      "provider": "codex",
-      "roles": [
-        "implementer",
-        "reviewer"
-      ]
-    },
-    "gemini-4-neon": {
-      "provider": "antigravity",
-      "roles": [
-        "implementer",
-        "reviewer",
-        "devops"
-      ]
-    },
-    "claude-sonnet-5-5": {
-      "provider": "claudeAgent",
-      "roles": [
-        "reviewer",
-        "devops"
-      ]
-    },
-    "claude-opus-5-5": {
-      "provider": "claudeAgent",
-      "roles": [
-        "reviewer",
-        "devops"
-      ]
-    }
-  },
   "jev": {
     "model": "jev-1.13.0",
     "keyEnv": "TYPESAFE_API_KEY",

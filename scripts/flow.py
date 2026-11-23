@@ -33,18 +33,21 @@ PROVIDERS = {"claudeAgent": ("Claude", "effort"), "codex": ("Codex", "reasoningE
 MATCHES = 20  # Models one search shows.
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 ROLES = ("implementer", "reviewer", "devops")
-MODELS = {
-    "gpt-6.2-sol": {"provider": "codex", "roles": ["implementer"]},
+MODELS = {  # The approved models and their roles. Only one with a card in assets/cards.json is approved: Jev reads it.
+    "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer", "devops"]},
+    "claude-sonnet-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer", "devops"]},
     "gpt-6.2-astra": {"provider": "codex", "roles": ["implementer", "reviewer"]},
+    "gpt-6.2-sol": {"provider": "codex", "roles": ["implementer"]},
     "gemini-4-neon": {"provider": ANTIGRAVITY, "roles": ["implementer", "reviewer", "devops"]},
-    "claude-sonnet-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
-    "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
-}  # Jev weighs each by its LiveBench 2.0 scores: assets/scores.json, refreshed by scores.py.
-RETIRED = {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "deepseek/deepseek-v4.1-flash", "google/gemini-4-argon",
-           "qwen/qwen3.8-flash", "moonshotai/kimi-k3.1-pro",
-           "google/gemini-4-neon",  # Neon runs on Antigravity.
-           "claude-haiku-5-5", "deepseek/deepseek-v4.1-flash-1017",
-           "z-ai/glm-5.3-prime"}  # Gone from every project's list, even one bound with them.
+    "gemini-4-argon": {"provider": ANTIGRAVITY, "roles": ["implementer"]},
+    "gemini-4-hydrogen": {"provider": ANTIGRAVITY, "roles": ["implementer"]},
+    "claude-fable-5-2": {"provider": "claudeAgent", "roles": []},  # Kept for a later lead role.
+    "google/gemini-4-carbon": {"provider": GOOSE, "roles": ["implementer", "reviewer"]},
+    "deepseek/deepseek-v4.1-flash": {"provider": GOOSE, "roles": ["implementer"]},
+    "z-ai/glm-5.3-prime": {"provider": GOOSE, "roles": ["implementer"]},
+    "moonshotai/kimi-k3.1-pro": {"provider": GOOSE, "roles": ["implementer"]},
+    "qwen/qwen4-max": {"provider": GOOSE, "roles": ["implementer"]},
+}
 DEFAULTS = {"implementerEffort": "xhigh", "reviewer": "gpt-6.2-astra", "reviewerEffort": "xhigh",
             "devops": "claude-sonnet-5-5", "devopsEffort": "high"}  # No implementer model: Jev chooses it, else best_scored.
 SHIPPED = {"reviewer": "claude-opus-5-5"}  # Defaults an earlier version shipped, which a binding it made still stores.
@@ -108,6 +111,13 @@ def sent(provider, effort):
     return {(GOOSE, "xhigh"): "high", (ANTIGRAVITY, "max"): "xhigh"}.get((provider, effort), effort)
 
 
+def approved():
+    """The approved models, {model: {"provider", "roles"}}: those in MODELS that have a card. Every binding works with
+    this list, whatever list an earlier version stored in it."""
+    cards = jev.cards()
+    return {m: copy.deepcopy(item) for m, item in MODELS.items() if m in cards}
+
+
 def validate_config(raw):
     config = copy.deepcopy(raw)
     text(config.get("projectId"), "projectId")
@@ -121,17 +131,13 @@ def validate_config(raw):
             "github.repo must be owner/name")
     require(isinstance(hub.get("requiredChecks"), list) and all(isinstance(c, str) and c for c in hub["requiredChecks"]),
             "github.requiredChecks must list the CI check names")
-    config.setdefault("models", copy.deepcopy(MODELS))
+    config.pop("models", None)  # The approved models are the shipped ones with a card (approved()), never a binding's.
     config["defaults"] = {key: value for key, value in {**DEFAULTS, **(config.get("defaults") or {})}.items() if key in DEFAULTS}
-    for model_id, item in config["models"].items():
-        require(item.get("provider") in PROVIDERS, f"{model_id}: provider is one of {', '.join(PROVIDERS)}")
-        require(set(item.get("roles") or []) <= set(ROLES), f"{model_id}: roles are implementer, reviewer and devops")
+    models = approved()
     for role in ROLES:
         if role in config["defaults"]:
-            require(role in (config["models"].get(config["defaults"][role]) or {}).get("roles", []),
+            require(role in (models.get(config["defaults"][role]) or {}).get("roles", []),
                     f"defaults.{role} must be an approved {role} model")
-        else:  # Jev chooses among the approved ones.
-            require(any(role in item.get("roles", []) for item in config["models"].values()), f"models must approve an {role}")
         require(config["defaults"][role + "Effort"] in EFFORTS, f"defaults.{role}Effort must be one of {', '.join(EFFORTS)}")
     config.setdefault("checks", [])
     require(isinstance(config["checks"], list), "checks must be a list")
@@ -494,17 +500,14 @@ class Flow:
         row = self.db.execute("SELECT config, state FROM projects WHERE id=?", (project,)).fetchone()
         require(row, f"Project {project} has no binding")
         config = json.loads(row[0])
-        # A model approved after the project was bound joins its list and a retired one leaves it, its default giving
-        # way to the current one. An implementer default an older version stored goes: Jev chooses that model. Jev
-        # weighs only the models T3 runs at the time.
-        # A role a shipped model gained since joins its stored entry, and a default an earlier version shipped moves to
-        # the current one once T3 runs it; a model the user picked stays theirs.
-        stored = config.get("models") or {}
-        config["models"] = {m: {**item, "roles": list(dict.fromkeys([*item.get("roles", []), *MODELS[m]["roles"]]))}
-                            if m in MODELS and m in stored else item
-                            for m, item in {**MODELS, **stored}.items() if m not in RETIRED}
-        config["defaults"] = {key: DEFAULTS[key] if value in RETIRED else value for key, value in config["defaults"].items()
-                              if key in DEFAULTS}
+        # Every binding works with the approved models of this version, whatever list an earlier one stored: a model
+        # approved since joins, and one without a card leaves, a default on it giving way to the current one. An
+        # implementer default an older version stored goes: Jev chooses that model. Jev weighs only the models T3 runs
+        # at the time. A default an earlier version shipped moves to the current one once T3 runs it; a model the user
+        # picked stays theirs.
+        config["models"] = approved()
+        config["defaults"] = {key: DEFAULTS[key] if key in ROLES and key not in (config["models"].get(value) or {}).get(
+            "roles", []) else value for key, value in config["defaults"].items() if key in DEFAULTS}
         for role, old in SHIPPED.items():
             new = DEFAULTS[role]
             if config["defaults"].get(role) == old and runs(t3_lists()[0], new, config["models"][new]["provider"]) is not False:
@@ -550,7 +553,7 @@ class Flow:
         config = validate_config({"projectId": project, "orchestrator": thread, "workspace": req.get("workspace"),
                                   "branch": req.get("branch"), "github": {"repo": req.get("repo"),
                                                                           "requiredChecks": req.get("requiredChecks")},
-                                  **{k: req[k] for k in ("checks", "noChecksReason", "defaults", "models", "quietMinutes")
+                                  **{k: req[k] for k in ("checks", "noChecksReason", "defaults", "quietMinutes")
                                      if req.get(k) is not None}})
         require(not self.path.is_relative_to(Path(config["workspace"])), "The harness database must live outside the project")
         picks = req.get("picks") or {}
@@ -565,20 +568,20 @@ class Flow:
                           if (pick := settle_pick(role, {}, raw, config["defaults"], lists))}
         state["devopsOn"] = devops
         if lists is not None:  # Every role must start on something this T3 runs, and Jev advises only among those.
+            models = {**config, "models": approved()}
             for role in ROLES:
                 if state["picks"].get(role, {}).get("model"):
                     continue
                 model = config["defaults"].get(role)
                 if model:
-                    provider = config["models"][model]["provider"]
+                    provider = models["models"][model]["provider"]
                     require(runs(lists, model, provider),
                             f"T3 cannot run {model}, the {role}'s default ({why.get(provider) or 'T3 does not list it'}). "
                             f"Pick a model for the {role}; the models operation lists what T3 runs.")
                 else:
-                    approved = ", ".join(m for m, item in config["models"].items() if role in item.get("roles", []))
-                    require(best_scored(config, role, lists), f"T3 runs none of the approved {role}s ({approved}). "
+                    names = ", ".join(m for m, item in models["models"].items() if role in item.get("roles", []))
+                    require(best_scored(models, role, lists), f"T3 runs none of the approved {role}s ({names}). "
                             f"Pick a model for the {role}; the models operation lists what T3 runs.")
-            config["models"] = {m: item for m, item in config["models"].items() if runs(lists, m, item["provider"])}
         with self.db:
             exists = self.db.execute("SELECT 1 FROM projects WHERE id=?", (project,)).fetchone()
             require(not exists, f"Project {project} is already bound")
@@ -592,10 +595,10 @@ class Flow:
         lists, why = t3_lists()
         defaults = {}
         for role in ROLES:
-            model = DEFAULTS.get(role)
-            starts = model or best_scored({"models": MODELS}, role, lists)
+            model, models = DEFAULTS.get(role), approved()
+            starts = model or best_scored({"models": models}, role, lists)
             defaults[role] = {"model": model, **({} if model else {"fallback": starts}), "effort": DEFAULTS[role + "Effort"],
-                              "runs": runs(lists, starts, MODELS[starts]["provider"]) if starts else False}
+                              "runs": runs(lists, starts, models[starts]["provider"]) if starts else False}
         if lists is None:
             return {"known": False, "defaults": defaults,
                     "reason": "T3's model lists are not on this computer, so nothing can be checked or picked."}
