@@ -9,7 +9,8 @@ LiveBench's options: Jev sees its Coding and Long Agentic suites until `--suites
 reads one release, for when the newest cannot be found on its site. Its data has no stated licence; robots.txt allows
 every agent.
 
-A refresh fails, and writes nothing, when a board cannot be read or no board scores an approved model.
+A refresh fails, and writes nothing, when a board cannot be read or no board scores a model NAMES lists. An approved
+model no board lists stays out of the file, and Jev reads its scores as unknown.
 """
 
 from __future__ import annotations
@@ -42,13 +43,20 @@ SUITES = {
     "reasoning": ("Reasoning", "short logic, spatial and theory-of-mind questions, with a single correct answer"),
 }
 DEFAULT_SUITES = ("coding", "long_agentic")
-NAMES = {  # Per board, each approved model's name there.
+NAMES = {  # Per board, the name there of each approved model it lists. A model a board does not list is left out here,
+    # and Jev reads its scores as unknown.
     "livebench": {
         "gpt-6.2-sol": "gpt-6.2-sol",
         "gpt-6.2-astra": "gpt-6.2-astra",
         "gemini-4-neon": "gemini-4-neon",
+        "gemini-4-argon": "gemini-4-argon",
+        "gemini-4-hydrogen": "gemini-4-hydrogen",
+        "google/gemini-4-carbon": "gemini-4-carbon",
         "claude-sonnet-5-5": "claude-sonnet-5.5",
         "claude-opus-5-5": "claude-opus-5.5",
+        "claude-fable-5-2": "claude-fable-5.2",
+        "moonshotai/kimi-k3.1-pro": "kimi-k3.1-pro",
+        "qwen/qwen4-max": "qwen4-max",
     },
 }
 BORROWED = {}  # Per board, approved models it does not list, scored as the stand-in NAMES gives them, and marked so.

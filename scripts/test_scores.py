@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import flow
+import jev
 import scores
 
 # LiveBench 2.0's table.csv for release 20261106 (2026-11-22), trimmed.
@@ -88,11 +89,15 @@ class RefreshTests(unittest.TestCase):
             self.refresh(names=names)
         self.assertFalse(self.file.exists())
 
-    def test_every_approved_model_is_named_on_a_board_and_has_shipped_scores(self):
-        self.assertEqual(set(flow.MODELS) - {m for names in scores.NAMES.values() for m in names}, set())
+    def test_each_named_model_is_approved_and_has_shipped_scores_and_the_rest_stay_unknown(self):
+        named = {m for names in scores.NAMES.values() for m in names}
+        self.assertLessEqual(named, set(flow.MODELS))
         boards = json.loads((Path(flow.ROOT) / "assets" / "scores.json").read_text(encoding="utf-8"))["boards"]
-        self.assertEqual(set(flow.MODELS) - {m for board in boards.values() for m in board["models"]}, set())
+        self.assertEqual(named - {m for board in boards.values() for m in board["models"]}, set())
+        self.assertLessEqual({m for board in boards.values() for m in board["models"]}, set(flow.MODELS))
         self.assertLessEqual(set(boards["livebench"]["suites"]), set(scores.SUITES))
+        request = json.dumps(jev.build_request({"models": {"z-ai/glm-5.3-prime": flow.MODELS["z-ai/glm-5.3-prime"]}}, {}))
+        self.assertIn("Scores: LiveBench 2.0 unknown.", request, "a model no board lists")
 
 
 if __name__ == "__main__":

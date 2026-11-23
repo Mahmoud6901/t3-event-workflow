@@ -1,12 +1,12 @@
 {
-  "fetched": "2026-11-22",
+  "fetched": "2026-11-23",
   "boards": {
     "livebench": {
       "label": "LiveBench 2.0",
       "url": "https://livebench.ai/",
       "scale": "0 to 100",
       "release": "20261106",
-      "updated": "2026-11-19",
+      "updated": "2026-11-23",
       "suites": {
         "coding": {
           "name": "Coding",
@@ -30,6 +30,18 @@
           "coding": 89.7,
           "long_agentic": 82.6
         },
+        "gemini-4-argon": {
+          "coding": 85.7,
+          "long_agentic": 58.5
+        },
+        "gemini-4-hydrogen": {
+          "coding": 78.5,
+          "long_agentic": 61.8
+        },
+        "google/gemini-4-carbon": {
+          "coding": 91.0,
+          "long_agentic": 71.8
+        },
         "claude-sonnet-5-5": {
           "coding": 77.2,
           "long_agentic": 62.5
@@ -37,6 +49,18 @@
         "claude-opus-5-5": {
           "coding": 87.1,
           "long_agentic": 72.8
+        },
+        "claude-fable-5-2": {
+          "coding": 79.2,
+          "long_agentic": 82.9
+        },
+        "moonshotai/kimi-k3.1-pro": {
+          "coding": 67.8,
+          "long_agentic": 38.7
+        },
+        "qwen/qwen4-max": {
+          "coding": 69.8,
+          "long_agentic": 46.6
         }
       }
     }
