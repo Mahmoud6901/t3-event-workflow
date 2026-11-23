@@ -1606,6 +1606,45 @@ class FlowTests(unittest.TestCase):
                             for line in self.last_step["tell"]), self.last_step["tell"])
         self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
 
+    def test_when_nothing_more_can_move_without_you_one_summary_leads_with_what_waits_for_you(self):
+        self.bind()
+        self.queue("Fix the login typo", {"task": "Add a footer", "brief": "Add it."},
+                   {"task": "Use the name", "brief": "Use it.", "after": ["Fix the login typo"]})
+        first, second = self.start()
+        self.assertTrue(self.worker("stuck", *worker_command(first), "--why", "Which login API, v1 or v2?")["ok"])
+        self.end(first)
+        self.end(second)
+        (nudge,) = self.start()
+        self.assertFalse([line for line in self.last_step["tell"] if line.startswith("Summary:")], "a follow-up is due")
+        self.end(nudge)
+        step = self.orchestrator("next")
+        (ask,) = self.status()["openAsks"]
+        self.assertEqual(step["tell"][-1], (
+            f"Summary: nothing more can move without you. Waiting for you: {ask['id']} (Fix the login typo asks: Which "
+            f"login API, v1 or v2?); Add a footer (M30) is blocked: its implementer ended twice without reporting. "
+            f"So far 0 merged, 0 dropped."))
+        self.assertEqual(self.orchestrator("next")["tell"], [], "told once per stop")
+        self.assertTrue(self.orchestrator("queue_edit", drop="Add a footer")["ok"])
+        self.assertTrue(self.orchestrator("next")["tell"][-1].endswith("So far 0 merged, 1 dropped."), "something changed")
+
+    def test_a_finished_queue_gets_its_summary_once(self):
+        call, review, tree = self.to_review()
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve",
+                                    "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
+        (devops_call,) = self.start()
+        devops = worker_command(devops_call)
+        self.end(call)
+        self.end(review)
+        job = self.worker("take", *devops)
+        self.green(job["head"])
+        self.assertTrue(self.worker("merge", *devops)["ok"])
+        self.assertFalse([line for line in self.orchestrator("next")["tell"] if line.startswith("Summary:")],
+                         "DevOps's run is still going")
+        self.end(devops_call)
+        step = self.orchestrator("next")
+        self.assertEqual(step["tell"][-1], "Summary: the queue is finished: 1 merged, 0 dropped.")
+        self.assertEqual(self.orchestrator("next")["tell"], [])
+
     def test_devops_whose_run_ended_is_woken_by_the_next_confirmation(self):
         self.bind()
         self.queue("Fix the login typo", {"task": "Add a footer", "brief": "Add it.", "after": []})

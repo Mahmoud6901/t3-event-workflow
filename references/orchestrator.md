@@ -76,6 +76,9 @@ Then run `next` and carry on with step 2 of [every wake](#every-wake).
 `tell` already gives the reports the user wants. Add nothing between them unless they ask. When
 `status` lists problems, tell the user which part keeps failing and its last error.
 
+When nothing more can move without the user, `tell` ends with a "Summary:" line. End your message
+with it, what waits for them first: they may read only the end, on a phone.
+
 ## When something goes wrong
 
 - **A refused operation:** its error says what to change. Fix the request, or ask the user when the

@@ -884,8 +884,9 @@ class Flow:
                     elif task["state"] == "implementing" and task.get("fix"):
                         self.send_fix(config, state, task)
                 self.call_devops(config, state, choices.get("devops"), lambda entry, name: held(entry, "devops", f"Plan {name}"))
+            summary = self.stop_summary(state)
             calls = list(state["calls"].values())
-            told, state["tell"] = state["tell"], []
+            told, state["tell"] = state["tell"] + ([summary] if summary else []), []
             asks = [a for a in state["asks"].values() if not a.get("asked")]
             for ask in asks:
                 ask["asked"] = True
@@ -922,6 +923,8 @@ class Flow:
                 if call["tool"] == "task_cancel":
                     worker["state"] = "cancelled"
                 recorded.append(call["call"])
+            summary = self.stop_summary(state)
+            told += [summary] if summary else []
             return {"recorded": recorded, "tell": told, **({"unknown": unknown} if unknown else {})}
         return self.transact(project, change, "done")
 
@@ -2061,6 +2064,49 @@ class Flow:
         merged = sum(1 for t in tasks if t["state"] == "merged")
         dropped = len(tasks) - merged
         state["tell"].append(f"Plan {name} done: {merged} merged{f', {dropped} dropped' if dropped else ''}.")
+
+    def stop_summary(self, state):
+        """Once per stop of an active binding: when nothing can move without the user (no worker working or about to
+        start, no call pending, every task finished or waiting on the user), one line for them, what waits for them
+        first, then how many tasks merged and how many were dropped. Told again only after something moved."""
+        tasks = list(state["tasks"].values())
+        unfinished = [t for t in tasks if t["state"] not in {"merged", "dropped"}]
+        if (state["control"] != "active" or not tasks or state["calls"]
+                or any(w["state"] in {"working", "prepared"} for w in state["workers"].values())
+                or any(t["state"] not in {"asking", "blocked", "waiting", "pipeline_wait"} or t.get("held")
+                       for t in unfinished)):
+            state.pop("stopped", None)
+            return None
+        asks = sorted((a for a in state["asks"].values() if not a.get("answered")), key=lambda a: int(a["id"][1:]))
+        key = json.dumps([sorted([t["id"], t["state"]] for t in tasks), [a["id"] for a in asks]])
+        if state.get("stopped") == key:
+            return None
+        state["stopped"] = key
+        merged = sum(1 for t in tasks if t["state"] == "merged")
+        counts = f"{merged} merged, {len(tasks) - merged - len(unfinished)} dropped"
+        if not unfinished:
+            return f"Summary: the queue is finished: {counts}."
+        waiting = [f"{a['id']} ({ask_words(state, a)})" for a in asks]
+        asked = {a["task"] for a in asks}
+        for task in unfinished:
+            if task["state"] == "blocked" and task["id"] not in asked:
+                why = next((h.get("note") for h in reversed(task["history"]) if h["to"] == "blocked"), None)
+                waiting.append(f"{task['task']} ({task['plan']}) is blocked" + (f": {why}" if why else ""))
+            elif task["state"] == "pipeline_wait" and not task.get("waitingOn"):
+                waiting.append(f"{task['task']} ({task['plan']}) waits for a pipeline fix DevOps has not opened")
+        return (f"Summary: nothing more can move without you. Waiting for you: {'; '.join(waiting) or 'nothing named'}. "
+                f"So far {counts}.")
+
+
+def ask_words(state, ask):
+    """A few words for an open question in the stop summary."""
+    task = state["tasks"][ask["task"]]
+    if ask["kind"] == "outside":
+        return f"PR #{task.get('pr')} of {task['task']}: merge, back or drop"
+    if ask["kind"] == "rounds":
+        return f"{task['task']} after {REVIEW_ROUNDS} review rounds: carry on, restart or drop"
+    words = ask["question"].split(" asks: ", 1)[-1]
+    return f"{task['task']} asks: " + (words if len(words) <= 80 else words[:77].rstrip() + "...")
 
 
 DECISIONS = re.compile(r"^[ \t]*(#{1,6}[ \t]*)?(\*\*)?Decisions(?:\*\*)?[ \t]*(:)?(?:\*\*)?[ \t]*(.*)$",
