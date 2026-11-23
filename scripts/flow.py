@@ -882,7 +882,7 @@ class Flow:
         require(isinstance(results, list) and results, "results lists each call made, with what T3 returned")
 
         def change(config, state):
-            recorded, unknown = [], []
+            recorded, unknown, told = [], [], []
             for item in results:
                 call = state["calls"].pop(item.get("call"), None) if isinstance(item, dict) else None
                 if not call:
@@ -892,6 +892,9 @@ class Flow:
                 if call["tool"] == "delegate_task":
                     worker["childThreadId"] = text(item.get("childThreadId"), "childThreadId")
                     worker["state"] = "working"
+                    line = started_line(state, worker)
+                    if line not in told:
+                        told.append(line)
                 if call["tool"] in {"delegate_task", "t3_thread_send"} and item.get("taskId"):
                     worker["taskIds"].append(item["taskId"])
                     worker["state"] = "working" if worker["state"] != "cancelled" else "cancelled"
@@ -903,7 +906,7 @@ class Flow:
                 if call["tool"] == "task_cancel":
                     worker["state"] = "cancelled"
                 recorded.append(call["call"])
-            return {"recorded": recorded, **({"unknown": unknown} if unknown else {})}
+            return {"recorded": recorded, "tell": told, **({"unknown": unknown} if unknown else {})}
         return self.transact(project, change, "done")
 
     def ended(self, project, req):
@@ -1262,6 +1265,7 @@ class Flow:
             worker.update(model=pick["model"], modelSource="pick",
                           entry={"provider": pick.get("provider", GOOSE), "roles": [role], "thinking": pick.get("thinking", False)})
         if model and stand_in:
+            worker["standsInFor"] = choice["limit"]
             line = (f"{choice['limit']} is at its usage limit, so a new {'DevOps' if role == 'devops' else role} runs on "
                     f"{model} until it resets.")
             if line not in state["tell"]:
@@ -2087,6 +2091,22 @@ def worker_label(state, worker):
         task = state["tasks"].get(worker["task"])
     role = {"devops": "DevOps worker"}.get(worker["role"], worker["role"])
     return f"{worker['id']}, the {role} of " + (f"{task['task']} ({task['plan']})" if task else f"plan {worker['plan']}"), task
+
+
+WHY_MODEL = {"pick": "your choice", "default": "the default", "jev": "Jev's choice",
+             "scores": "the best-scored model, as Jev gave no answer"}
+
+
+def started_line(state, worker):
+    """The user's line for a worker whose start T3 confirmed: its role, its task, its model and effort, and why that
+    model. A stand-in names only the model it stands in for: the usage-limit line already said the rest."""
+    role = {"implementer": "Implementer", "reviewer": "Reviewer", "devops": "DevOps"}[worker["role"]]
+    task = state["tasks"].get(worker.get("task"))
+    what = f"{task['task']} ({task['plan']})" if task else f"plan {worker['plan']}"
+    why = WHY_MODEL.get(worker.get("modelSource"))
+    if worker.get("modelSource") == "limit":
+        why = f"a stand-in for {worker.get('standsInFor') or 'a model at its usage limit'}"
+    return f"{role} for {what} started on {worker['model']} at {worker['effort']}" + (f" ({why})." if why else ".")
 
 
 def closing(worker, task):

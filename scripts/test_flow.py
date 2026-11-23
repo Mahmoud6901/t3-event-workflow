@@ -717,9 +717,11 @@ class FlowTests(unittest.TestCase):
             self.runs[call["call"]] = f"task-{self.t3_task}"
             results.append({"call": call["call"], "taskId": f"task-{self.t3_task}", "childThreadId": f"child-{call['worker']}"}
                            if call["tool"] in {"delegate_task", "t3_thread_send"} else {"call": call["call"]})
+        self.last_done = None
         if results:
             done = self.orchestrator("done", results=results)
             self.assertTrue(done["ok"], done)
+            self.last_done = done
         self.last_step = step
         return step["calls"]
 
@@ -756,6 +758,47 @@ class FlowTests(unittest.TestCase):
                 db.execute("UPDATE projects SET config=? WHERE id=?", (store.packed(config), PROJECT))
         finally:
             db.close()
+
+    def test_each_confirmed_start_names_its_role_task_model_effort_and_why_once(self):
+        call, review, tree = self.to_review()
+        self.assertEqual(self.last_done["tell"],
+                         ["Reviewer for Fix the login typo (M30) started on claude-opus-5-5 at xhigh (the default)."])
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve",
+                                    "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
+        self.start()
+        self.assertEqual(self.last_done["tell"], ["DevOps for plan M30 started on claude-sonnet-5-5 at high (the default)."])
+        again = self.orchestrator("done", results=[{"call": review["call"], "taskId": "task-9", "childThreadId": "c"}])
+        self.assertEqual((again["tell"], again["unknown"]), ([], [review["call"]]), "a start is told once")
+
+    def test_the_implementers_start_says_whose_choice_its_model_was(self):
+        self.bind()
+        self.queue("Fix the login typo")
+        step = self.orchestrator("next")
+        self.assertFalse(any("started on" in line for line in step["tell"]), "nothing is told before T3 confirms the start")
+        self.start()
+        self.assertEqual(self.last_done["tell"],
+                         ["Implementer for Fix the login typo (M30) started on gpt-6.2-astra at xhigh (Jev's choice)."])
+        self.jev_answer = {}  # Jev gives no answer.
+        self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
+        self.start()
+        self.assertEqual(self.last_done["tell"], ["Implementer for Add a footer (M30) started on gemini-4-neon at xhigh "
+                                                  "(the best-scored model, as Jev gave no answer)."])
+
+    def test_a_picked_model_and_a_stand_in_say_so_when_they_start(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
+        self.bind(picks={"implementer": {"model": "gpt-6.2-sol", "effort": "high"}})
+        self.queue("Fix the login typo")
+        self.start()
+        self.assertEqual(self.last_done["tell"],
+                         ["Implementer for Fix the login typo (M30) started on gpt-6.2-sol at high (your choice)."])
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage={"codex": SPENT})
+        self.jev_answer["implementer"] = "gemini-4-neon"
+        self.assertTrue(self.orchestrator("restart", task="Fix the login typo", authorization="Restart it.")["ok"])
+        self.start()
+        self.assertIn("gpt-6.2-sol is at its usage limit, so a new implementer runs on gemini-4-neon until it resets.",
+                      self.last_step["tell"])
+        self.assertEqual(self.last_done["tell"], ["Implementer for Fix the login typo (M30) started on gemini-4-neon at "
+                                                  "high (a stand-in for gpt-6.2-sol)."])
 
     def test_a_confirmed_start_is_not_handed_out_again(self):
         self.bind()

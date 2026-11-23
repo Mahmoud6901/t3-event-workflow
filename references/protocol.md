@@ -10,7 +10,7 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
 | Operation | Example | Result |
 |---|---|---|
 | next | `{"op":"next"}` | `calls`, `tell`, `ask` |
-| done | `{"op":"done","results":[{"call":"w1-start","taskId":"…","childThreadId":"…"}]}` | `recorded` |
+| done | `{"op":"done","results":[{"call":"w1-start","taskId":"…","childThreadId":"…"}]}` | `recorded`, `tell` |
 | queue_set | `{"op":"queue_set","plans":[{"plan":"M30","owns":["src/login/"],"dependsOn":[],"tasks":[{"task":"Fix the login typo","brief":"…"},{"task":"Add the login test","brief":"…","after":["Fix the login typo"]}]}]}` | `plans` |
 | queue_edit | `{"op":"queue_edit","plan":"M30","tasks":[{"task":"…","brief":"…"}]}`, `{"op":"queue_edit","plans":[…]}`, `{"op":"queue_edit","drop":"Fix the login typo"}`, `{"op":"queue_edit","task":"Add the login test","after":[],"why":"…"}` | `plans`, `tasks`, `dropped`, `relinked` |
 | answer | `{"op":"answer","ask":"a7","answer":"merge"}` | `task`, `state` |

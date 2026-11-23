@@ -26,8 +26,8 @@ Each wake gets the same step:
 3. Record the results in one `done`. For `delegate_task`, record the `taskId` and `childThreadId` T3
    returned. For `t3_thread_send`, record the new `taskId`. For `task_cancel`, the call alone. A call
    that failed stays out of `done`, and you tell the user what T3 said.
-4. Tell the user every `tell` line, in your own words if you like, but leave none out. Put each `ask` to
-   them as it stands, with its id. Never answer one yourself.
+4. Tell the user every `tell` line of `next` and `done`, in your own words if you like, but leave none
+   out. Put each `ask` to them as it stands, with its id. Never answer one yourself.
 5. End your turn. Workers wake you when they finish; nothing needs polling.
 
 Your hook records each finished worker before your turn starts, so `next` already knows who ended. It
