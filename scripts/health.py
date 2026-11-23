@@ -1,5 +1,5 @@
-"""The health of the workflow's background parts: scan, send, hooks, jev, github, worktree and workspace. A part is a
-problem after three failures in a row, and its next success clears it; a healthy part takes no space in status. Each
+"""The health of the workflow's background parts: scan, send, hooks, jev, github, worktree, workspace and record. A
+part is a problem after three failures in a row, and its next success clears it; a healthy part takes no space in status. Each
 part writes only its own file under state/health, so writers never collide. Standard library only, and reporting never
 raises: hooks and the watcher call it.
 """

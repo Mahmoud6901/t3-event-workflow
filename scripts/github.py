@@ -65,8 +65,8 @@ class GitHub:
         return json.loads(out) if out.strip() else None
 
     def pull(self, number):
-        """The PR as the workflow reads it: number, state, merged, head commit, branch, base, url, body and changed
-        files."""
+        """The PR as the workflow reads it: number, state, merged, head commit, branch, base, url, body, changed files,
+        and its size: how many files it changes and the lines it adds and deletes."""
         pr = self.api("GET", f"repos/{self.repo}/pulls/{number}")
         files, page = [], 1
         while True:
@@ -77,7 +77,8 @@ class GitHub:
             page += 1
         return {"number": pr["number"], "state": pr["state"], "merged": bool(pr.get("merged")), "head": pr["head"]["sha"],
                 "branch": pr["head"]["ref"], "base": pr["base"]["ref"], "url": pr.get("html_url"),
-                "mergeCommit": pr.get("merge_commit_sha"), "body": pr.get("body") or "", "files": files}
+                "mergeCommit": pr.get("merge_commit_sha"), "body": pr.get("body") or "", "files": files,
+                "changedFiles": pr.get("changed_files"), "additions": pr.get("additions"), "deletions": pr.get("deletions")}
 
     def checks(self, sha, names):
         """{name: success | failure | pending | missing} for each named check run or commit status on this commit.

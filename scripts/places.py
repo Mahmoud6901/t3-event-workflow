@@ -42,9 +42,18 @@ def home_of(code=CODE):
         return None
 
 
+def record_home(shared, home=None):
+    """Where the record of how each model did (record.py) lives: the shared data folder, which every bound project on
+    this computer has in common, unless that folder is a repository's clone (one that keeps its own state/); then
+    ~/.t3-workflow, so the record is never inside a repository."""
+    shared = Path(shared)
+    return Path(home or Path.home()) / ".t3-workflow" if (shared / ".git").exists() else shared
+
+
 BASE = base()
 STATE = BASE / "state"
 HOME = home_of()
 SHARED = Path(HOME["shared"]) if HOME else BASE  # The shared install's data folder: the Jev key is kept there.
 SECRETS = SHARED / "secrets"
+RECORD = record_home(SHARED) / "state" / "record.sqlite3"  # Counts only; see record.py.
 T3_HOME = Path(os.environ.get("T3CODE_HOME") or Path.home() / ".t3")
