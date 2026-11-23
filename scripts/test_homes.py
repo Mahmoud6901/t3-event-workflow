@@ -108,6 +108,17 @@ class HomeTests(unittest.TestCase):
         self.assertFalse((state / "harness-artifacts" / "app").exists())
         self.assertEqual(homes.find(str(other), self.homes), None)
 
+    def test_a_moved_binding_whose_id_a_folder_name_cannot_hold_keeps_its_check_logs(self):
+        project = "mcp:00000000-1111"  # The form of T3's id for some projects (2026-11-23); Windows refuses ':' in a name.
+        self.bind_shared(project, self.workspace, "orch-app")
+        logs = self.db.parent / "harness-artifacts" / places.segment(project) / "tests"
+        logs.mkdir(parents=True)
+        (logs / "log.txt").write_text("passed")
+        home = homes.move(self.db, project, self.homes, CODE, self.shared)
+        self.assertEqual((home / "state" / "harness-artifacts" / places.segment(project) / "tests" / "log.txt").read_text(),
+                         "passed")
+        self.assertFalse(logs.exists())
+
     def test_a_move_interrupted_after_its_home_took_over_is_finished_by_the_next_one(self):
         self.bind_shared("app", self.workspace, "orch-app")
         home = homes.move(self.db, "app", self.homes, CODE, self.shared)

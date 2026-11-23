@@ -237,8 +237,8 @@ def move(db_path, project, root=ROOT, code=places.CODE, shared=places.BASE):
         if (state_dir / "docs-seen" / record).exists():
             (home / "state" / "docs-seen").mkdir(parents=True, exist_ok=True)
             shutil.copy2(state_dir / "docs-seen" / record, home / "state" / "docs-seen" / record)
-        if (state_dir / "harness-artifacts" / project).is_dir():
-            shutil.copytree(state_dir / "harness-artifacts" / project, home / "state" / "harness-artifacts" / project)
+        for logs in artifacts(state_dir, project):
+            shutil.copytree(logs, home / "state" / "harness-artifacts" / places.segment(project), dirs_exist_ok=True)
         write_info(home, {"project": project, "workspace": config["workspace"], "shared": str(shared), "code": fingerprint(code)})
         for table, key in TABLES:
             source.execute(f"DELETE FROM {table} WHERE {key}=?", (project,))
@@ -251,6 +251,20 @@ def move(db_path, project, root=ROOT, code=places.CODE, shared=places.BASE):
         raise
     finally:
         source.close()
-    shutil.rmtree(state_dir / "harness-artifacts" / project, ignore_errors=True)
+    for logs in artifacts(state_dir, project):
+        shutil.rmtree(logs, ignore_errors=True)
     (state_dir / "docs-seen" / record).unlink(missing_ok=True)
     return home
+
+
+def artifacts(state_dir, project):
+    """The project's check-log folders in a shared data folder: under its safe name, and under its id as an older
+    version named it, where the system allows that name."""
+    found = []
+    for name in dict.fromkeys((places.segment(project), project)):
+        try:
+            if (Path(state_dir) / "harness-artifacts" / name).is_dir():
+                found.append(Path(state_dir) / "harness-artifacts" / name)
+        except (OSError, ValueError):  # A name this system cannot hold was never written here.
+            pass
+    return found

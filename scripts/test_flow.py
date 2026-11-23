@@ -648,6 +648,19 @@ class FlowTests(unittest.TestCase):
         self.assertIn(str(tree.resolve()).replace("\\", "/"), arguments["task"])
         self.assertIn("lint: passed", arguments["task"])
 
+    def test_a_project_whose_t3_id_a_folder_name_cannot_hold_still_runs_its_checks(self):
+        # T3 gave a project an id of the form mcp:<uuid> (2026-11-23), and worker pr crashed making its log folder.
+        with patch.object(sys.modules[__name__], "PROJECT", "mcp:00000000-1111-4222-8333-444444444444"):
+            self.bind(checks=[{"name": "lint", "argv": [sys.executable, "-c", "print('lint ok')"]}])
+            self.queue("Fix the login typo")
+            (call,) = self.start()
+            worker, token, tree = self.implement(call, "export const name = 1;\n", 7)
+            result = self.worker("pr", worker, token, "--pr", "7", path=tree)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["state"], "review_needed")
+        (folder,) = (self.db.parent / "harness-artifacts").iterdir()
+        self.assertRegex(folder.name, r"^[A-Za-z0-9._-]+$", "only characters every system takes in a folder name")
+
     def test_a_pull_request_whose_checks_fail_is_refused_with_the_output(self):
         self.bind(checks=[{"name": "unit", "argv": [sys.executable, "-c", "import sys; print('2 failed'); sys.exit(1)"]}])
         self.queue("Fix the login typo")

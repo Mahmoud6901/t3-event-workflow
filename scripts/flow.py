@@ -1226,7 +1226,7 @@ class Flow:
 
     def run_checks(self, config, project, name, tree, head):
         """The binding's local checks in the worker's checkout; their logs go under state/harness-artifacts."""
-        folder = self.path.parent / "harness-artifacts" / project / name / head
+        folder = self.path.parent.joinpath("harness-artifacts", *(places.segment(part) for part in (project, name, head)))
         folder.mkdir(parents=True, exist_ok=True)
         results = []
         for index, check in enumerate(config["checks"], 1):
