@@ -1,8 +1,10 @@
 """The workflow's one background process: it notices workers that went quiet.
 
 While T3 runs, every INTERVAL seconds, it reads T3's database read-only for each working worker's latest activity. A
-worker whose T3 run is still going but has not moved for its binding's quietMinutes is told to the user through `next`,
-and the orchestrator gets one message per quiet spell naming it. The orchestrator restarts it only on the user's word.
+worker whose T3 run is still going but has not moved for its binding's quietMinutes gets the orchestrator one message per
+quiet spell naming it. While the binding is active, that wake's `next` replaces the worker without the user, once per
+piece of work; when the replacement goes quiet too, its task is blocked for the user (Flow.quiet). A paused or stopped
+binding replaces nobody: the quiet worker is only told to the user.
 A worker whose run ended is not watched: T3 wakes the orchestrator for that, and its hook records the end. An end the
 hook missed (T3 reworded its notice, say) is recorded once its notice is LATE old, and the orchestrator is woken once
 for it (Flow.late_wake). For a plan without DevOps it also wakes the orchestrator once per merge step the harness can

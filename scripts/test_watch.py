@@ -71,17 +71,31 @@ class WatchTests(unittest.TestCase):
             engine.close()
 
     def test_a_worker_quiet_past_its_minutes_is_named_to_the_orchestrator_once_per_quiet_spell(self):
+        self.op("control", action="pause")  # Paused, nobody is replaced: the quiet worker is only told.
         self.assertEqual(self.scan(20), [])
         self.assertEqual(self.scan(40), [self.worker])
         ((thread, text),) = self.sent
         self.assertEqual(thread, ORCH)
         self.assertIn("use t3 workflow", text)
         self.assertIn(self.worker, text)
-        tell = self.op("next")["tell"]
-        self.assertTrue(any(self.worker in line and "restart Fix the login typo" in line for line in tell), tell)
+        step = self.op("next")
+        self.assertEqual(step["calls"], [])
+        self.assertTrue(any(self.worker in line and "restart Fix the login typo" in line for line in step["tell"]),
+                        step["tell"])
         self.assertEqual(self.scan(50), [], "one message per quiet spell")
         self.moved(55)
         self.assertEqual(self.scan(90), [self.worker], "moving again starts a new spell")
+
+    def test_an_active_bindings_quiet_worker_wakes_the_orchestrator_whose_next_replaces_it(self):
+        self.assertEqual(self.scan(40), [self.worker])
+        self.assertEqual(len(self.sent), 1)
+        step = self.op("next")
+        self.assertEqual([(c["tool"], c["worker"]) for c in step["calls"]][0], ("task_cancel", self.worker))
+        (fresh,) = [c for c in step["calls"] if c["tool"] == "delegate_task"]
+        self.assertNotEqual(fresh["worker"], self.worker)
+        self.assertIn(f"{self.worker}, the implementer of Fix the login typo (M30) was quiet since {at(1)}, so it was "
+                      f"stopped and a new implementer took over.", step["tell"])
+        self.assertEqual(self.scan(90), [], "the stopped worker is not watched")
 
     def test_a_worker_whose_run_ended_is_left_to_its_wake(self):
         with closing(sqlite3.connect(self.native_path)) as db, db:

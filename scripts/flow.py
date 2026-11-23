@@ -351,6 +351,12 @@ def ci_checks(config, state):
     return config["github"]["requiredChecks"] if state.get("ciOn", True) else []
 
 
+def uncount(item, role):
+    """The role's quiet replacement on this work (a task, or a plan's DevOps entry) no longer counts."""
+    if item and role in (item.get("quietReplaced") or []):
+        item["quietReplaced"] = [r for r in item["quietReplaced"] if r != role]
+
+
 def review_fix(task):
     """What the implementer is told when the reviewer asked for changes."""
     return {"kind": "review", "detail": f"The reviewer asked for changes on PR #{task['pr']}."}
@@ -801,11 +807,14 @@ class Flow:
         ready = {t["id"] for t in state["tasks"].values()
                  if t["state"] == "waiting" and self.unblocked(state, t) and not self.parked(state, t)}
         back, choices, facts, waits = set(), {}, {}, {}
-        for worker in state["workers"].values():  # Quota-stopped workers whose work goes back to start anew.
+        for worker in state["workers"].values():  # Quota-stopped and quiet workers whose work goes back to start anew.
             if (worker.get("ended") or {}).get("quota") and not worker["ended"].get("seen") and worker["state"] != "cancelled":
                 task = self.owing(state, worker)
                 if task or worker["role"] == "devops":
                     back.add((worker["role"], task and task["id"]))
+            elif self.quiet_due(worker) and self.quiet_act(state, worker, self.owing(state, worker)) == "replace":
+                task = self.owing(state, worker)
+                back.add((worker["role"], task and task["id"]))
         ready |= {task_id for role, task_id in back if role == "implementer"}
         if state["control"] == "active":
             gh = self.hub_for(config["github"]["repo"])
@@ -852,6 +861,13 @@ class Flow:
                 if worker.get("ended") and not worker["ended"].get("seen"):
                     worker["ended"]["seen"] = True
                     self.settle(state, worker, waits)
+            for worker in list(state["workers"].values()):
+                if self.quiet_due(worker):
+                    worker["quiet"]["acted"] = True
+                    task = self.owing(state, worker)
+                    act = self.quiet_act(state, worker, task)
+                    if act:
+                        self.quiet_over(state, worker, task, act)
             if state["control"] == "active":
                 for task in state["tasks"].values():
                     label = f"{task['task']} ({task['plan']})"
@@ -961,6 +977,7 @@ class Flow:
             old = state["workers"].get(task.get("blockedWorker") or task.get(role))
             if old:
                 self.retire(state, old, "restarted on the user's word")
+            uncount(task, role)  # The user's restart starts the count of quiet replacements again.
             for key in ("blockedFrom", "blockedWorker", "fix"):
                 task.pop(key, None)
             for ask in state["asks"].values():
@@ -984,6 +1001,15 @@ class Flow:
         if worker["state"] == "working" and not (let_finish and worker["job"].get("reported")):
             self.cancel(state, worker, reason)
         worker["state"] = "cancelled"
+
+    def reported(self, state, worker, task=None):
+        """The worker ran its closing command: its job is reported, and a quiet replacement in its role no longer counts
+        for its work."""
+        me = state["workers"][worker["id"]]
+        me["job"]["reported"] = True
+        uncount(task, me["role"])
+        if me["role"] == "devops":
+            uncount(state["devops"].get(me["plan"]), "devops")
 
     def owing(self, state, worker):
         """The task this worker still owes its closing command for, or None."""
@@ -1161,8 +1187,10 @@ class Flow:
         return [(p, json.loads(c), json.loads(s)) for p, c, s in self.db.execute("SELECT id, config, state FROM projects")]
 
     def quiet(self, project, worker_id, since, minutes):
-        """The watcher saw this working worker quiet since `since`, its latest activity in T3. A new quiet spell is told
-        to the user once. Returns whether the orchestrator still needs the watcher's message for it, and the message."""
+        """The watcher saw this working worker quiet since `since`, its latest activity in T3. While the binding is
+        active, a worker that owes its work is dealt with by the next `next` (quiet_over), without the user: replaced
+        the first time, its task blocked when its replacement goes quiet too. Any other quiet spell is told to the user
+        once. Returns whether the orchestrator still needs the watcher's message for it, and the message."""
         def change(config, state):
             worker = state["workers"].get(worker_id)
             if not worker or worker["state"] != "working":
@@ -1170,12 +1198,57 @@ class Flow:
             label, task = worker_label(state, worker)
             if (worker.get("quiet") or {}).get("since") != since:
                 worker["quiet"] = {"since": since, "sent": False}
-                advice = f" Say restart {task['task']} to replace it." if task else ""
-                state["tell"].append(f"{label} has been quiet since {since} ({minutes} minutes or more).{advice}")
+                if state["control"] == "active" and self.quiet_act(state, worker, self.owing(state, worker)):
+                    worker["quiet"]["replace"] = True
+                else:
+                    advice = f" Say restart {task['task']} to replace it." if task else ""
+                    state["tell"].append(f"{label} has been quiet since {since} ({minutes} minutes or more).{advice}")
             return {"send": not worker["quiet"]["sent"], "message": (
                 f"use t3 workflow: {label} has been quiet for {minutes} minutes. "
                 f"Run t3-workflow '{{\"op\":\"next\"}}' and tell the user.")}
         return self.transact(project, change, "quiet")
+
+    @staticmethod
+    def quiet_due(worker):
+        """Whether this worker's quiet spell waits for `next` to deal with it."""
+        spell = worker.get("quiet") or {}
+        return bool(spell.get("replace")) and not spell.get("acted") and worker["state"] == "working"
+
+    def quiet_act(self, state, worker, task):
+        """What a quiet spell of this worker does without the user: "replace" it the first time for its work, "block" its
+        task when a replacement went quiet too before that work reported. None when it owes nothing (or is a DevOps worker
+        that holds no task and was replaced already): the user is told instead."""
+        devops = worker["role"] == "devops"
+        if not task and not (devops and not (worker.get("job") or {}).get("reported")):
+            return None
+        item = task or state["devops"].get(worker["plan"]) or {}
+        if worker["role"] not in (item.get("quietReplaced") or []):
+            return "replace"
+        return "block" if task else None
+
+    def quiet_over(self, state, worker, task, act):
+        """A quiet worker is cancelled. The first time, its work goes back to where `next` starts a new worker in its
+        role, as a restart does, and that work counts one replacement. The next time, its task is blocked for the user."""
+        role, since = worker["role"], worker["quiet"]["since"]
+        label, _ = worker_label(state, worker)
+        name = "DevOps worker" if role == "devops" else role
+        why = f"its {name} was quiet since {since}"
+        self.retire(state, worker, why)
+        if act == "block":
+            task["blockedFrom"], task["blockedWorker"] = task["state"], worker["id"]
+            task.pop("devops", None)
+            self.move(task, "blocked", f"{why}, after a new one took over")
+            state["tell"].append(f"{task['task']} ({task['plan']}) is blocked: its new {name} was quiet too, since "
+                                 f"{since}. Say restart to give it another {name}, or drop it.")
+            return
+        if role == "devops":
+            self.devops_back(state, worker["plan"], task, why)
+        else:
+            self.move(task, "waiting" if role == "implementer" else "review_needed", why)
+        item = task or state["devops"][worker["plan"]]
+        item["quietReplaced"] = [*(item.get("quietReplaced") or []), role]
+        then = "a new DevOps worker starts when there is work" if role == "devops" and not task else f"a new {name} took over"
+        state["tell"].append(f"{label} was quiet since {since}, so it was stopped and {then}.")
 
     def quiet_sent(self, project, worker_id, since):
         def change(config, state):
@@ -1504,7 +1577,7 @@ class Flow:
             task.update(pr=pr["number"], url=pr["url"], head=pr["head"], branch=pr["branch"], files=pr["files"],
                         worktree=tree, evidence=evidence)
             state["workers"][worker["id"]].update(path=tree)
-            state["workers"][worker["id"]]["job"]["reported"] = True
+            self.reported(state, worker, task)
             self.move(task, "review_needed", f"PR #{pr['number']} at {pr['head'][:12]}")
             return {"state": "review_needed", "pr": pr["number"], "head": pr["head"],
                     "next": "The reviewer is called next. End your turn."}
@@ -1517,7 +1590,7 @@ class Flow:
             task = state["tasks"].get(worker["task"])
             require(task and task.get("implementer") == worker["id"] and task["state"] == "implementing",
                     "This task is not waiting on you")
-            state["workers"][worker["id"]]["job"]["reported"] = True
+            self.reported(state, worker, task)
             ask_id = next_id(state, "a")
             state["asks"][ask_id] = {"id": ask_id, "task": task["id"], "kind": "stuck", "options": None,
                                      "question": f"The implementer of {task['task']} ({task['plan']}) asks: {why}"}
@@ -1561,7 +1634,7 @@ class Flow:
             task["needed"] = [{"task": o["id"], "name": o["task"], "why": why, "at": now()} for o in needs]
             if kept:
                 task["pushedBranch"] = kept
-            state["workers"][worker["id"]]["job"]["reported"] = True
+            self.reported(state, worker, task)
             self.move(task, "waiting", f"its implementer needs {', '.join(o['id'] for o in needs)}: {why}")
             require(not waits_forever(state), (
                 f"That would wait forever: {', '.join(o['task'] for o in needs)} waits for this task, directly or "
@@ -1608,7 +1681,7 @@ class Flow:
         def change(config, state):
             task = state["tasks"][worker["task"]]
             require(task["rev"] == rev, "The task changed during your review; end your turn")
-            state["workers"][worker["id"]]["job"]["reported"] = True
+            self.reported(state, worker, task)
             task.setdefault("reviews", []).append({"sha": sha, "verdict": verdict})
             task.pop("returned", None)
             if verdict == "approve":
@@ -1644,7 +1717,7 @@ class Flow:
             if mine:
                 task = mine[0]
             elif merging or not ready or state["control"] != "active":
-                me["job"]["reported"] = True
+                self.reported(state, me)
                 entry["state"] = "idle"
                 why = "Another merge is in progress" if merging else "Nothing is waiting for you"
                 return {"job": None, "next": f"{why}. End your turn; a follow-up wakes you when there is work."}
@@ -1691,7 +1764,7 @@ class Flow:
             task["fix"] = update_fix(config, outcome, number)
             task["head"] = head
             task.pop("devops", None)
-            state["workers"][worker["id"]]["job"]["reported"] = True
+            self.reported(state, worker, task)
             self.move(task, "implementing", f"update: {outcome}")
             return {"result": outcome, "next": "The task went back to its implementer. End your turn."}
         return self.transact(project, change, "update")
@@ -1719,7 +1792,7 @@ class Flow:
             task = state["tasks"][self.held(state, worker)["id"]]
             require(task["rev"] == rev, "The task changed meanwhile")
             task.pop("devops", None)
-            state["workers"][worker["id"]]["job"]["reported"] = True
+            self.reported(state, worker, task)
             self.landed(state, task, sha, moved)
             return {"merged": sha, "next": "End your turn."}
         return self.transact(project, change, "merge")
@@ -1909,7 +1982,7 @@ class Flow:
             task = self.held(state, worker)
             require(state.get("ciOn", True), "CI is off for this project, so no merge waits for it: run update, then merge")
             task.pop("devops", None)
-            state["workers"][worker["id"]]["job"]["reported"] = True
+            self.reported(state, worker, task)
             if cause == "task":
                 task["fix"] = {"kind": "ci", "detail": f"CI failed on PR #{task['pr']}: {detail}"}
                 self.move(task, "implementing", "CI failed in the task's code")

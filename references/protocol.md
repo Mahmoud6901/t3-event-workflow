@@ -1,7 +1,7 @@
 # Protocol
 
 Every workflow call prints one JSON object: `{"ok": true, ...}`, or `{"ok": false, "error": "..."}`
-with a reason you can act on.
+with a reason to act on.
 
 The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the project and thread.
 
@@ -45,9 +45,8 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
     or `drop`.
   - After 3 review rounds: `carry on`, `restart` (a new implementer, on another model unless the
     implementer's model is picked) or `drop`.
-  - A stuck implementer's question takes the user's own words, which are sent to it.
-- **restart** replaces the worker that holds a task (an implementer, reviewer or DevOps) with a new one
-  in the same role.
+  - A stuck implementer's question takes the user's own words, sent to it.
+- **restart** gives a task a new worker in the role of the one that holds it.
 - **control**: `activate`, `pause`, `resume` or `stop`. All but `pause` need the user's own words.
   Workers start only while the binding is active. Running workers finish their current step.
 - **setup_github** applies the repo settings and protection in [setup](setup.md#4-protect-the-branch),
@@ -78,7 +77,7 @@ The hook runs `ended` for each "Delegated task …" notice; you never do.
 | `confirmed` | Ready to merge | `worker take` |
 | `merging` | DevOps holds it (or `next`, without DevOps) | `worker merge`, `worker failed`, `worker update` |
 | `pipeline_wait` | Waits for DevOps's pipeline fix to merge | That fix's merge |
-| `blocked` | A question for the user, or its worker ended twice without reporting | `answer`, `restart`, or a drop |
+| `blocked` | A question for the user, or its worker ended twice without reporting or went quiet twice | `answer`, `restart`, or a drop |
 | `merged`, `dropped` | Finished | |
 
 **The confirmation rule**, which `next` applies to each approved task:
@@ -95,6 +94,9 @@ changes, counted from your last answer, asks you instead.
 **A worker that ends without its closing command** gets one follow-up asking it to finish. If it ends
 that way again, its task is `blocked`, and `tell` says so. One stopped at its quota is replaced at
 once on a model with capacity, or its task waits for the reset.
+
+**A worker quiet for `quietMinutes`** is replaced once while the binding is active. If the new one goes
+quiet before that work reports, the task is `blocked`.
 
 ## Worker commands
 
@@ -123,4 +125,4 @@ A refused command changes nothing. Its error says what to do.
 Jev picks, per task, an implementer's model left open, never an effort; a stand-in at a usage limit. No answer: the best-scored model with capacity.
 
 **Problems:** `status` lists any background part (watcher scan, its sends, hooks, Jev, GitHub, a
-checkout) that failed three times in a row. A part's next success clears it.
+checkout) that failed three times in a row, until it next succeeds.

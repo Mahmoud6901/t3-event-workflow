@@ -31,8 +31,9 @@ A task whose reviewer asked for changes 3 times waits for the user: it carries o
 restarts with a new one, or is dropped.
 
 [harness.py](scripts/harness.py) owns every transition, and the binding lives in `state/`. Finished
-workers wake the orchestrator. One background process runs: the watcher, which reports workers that
-have been quiet too long.
+workers wake the orchestrator. One background process runs: the watcher, which notices workers that
+have been quiet too long. Each is replaced once without the user; if the new one goes quiet too, its task
+waits for the user.
 
 - **Setup:** [setup.md](references/setup.md)
 - **The orchestrator:** [orchestrator.md](references/orchestrator.md) and the

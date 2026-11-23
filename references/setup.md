@@ -99,7 +99,7 @@ In Codex's PowerShell, pipe a here-string instead, and keep the JSON ASCII (writ
 | `checks` | Local checks `worker pr` runs, each `{"name","argv","cwd","timeoutSeconds"}`. Give `argv` as a list, not shell text; `cwd` is relative to the project folder. |
 | `noChecksReason` | Why there are no local checks, when `checks` is empty |
 | `defaults` | Models and efforts without the user's choice or Jev's answer: reviewer Opus 5.5 at `xhigh`, DevOps Sonnet 5.5 at `high`, and the implementer's effort `xhigh`. The implementer has no default model. |
-| `quietMinutes` | Minutes before the watcher reports a quiet worker (default 30) |
+| `quietMinutes` | Minutes before a quiet worker is replaced (default 30) |
 | `picks` | The user's model and effort per role, from step 2 |
 | `devops` | `false` merges without a DevOps worker (default `true`), from step 2 |
 | `guarded` | Paths whose changes wait for the user's answer before a merge (default none), from step 2 |

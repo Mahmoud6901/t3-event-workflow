@@ -28,4 +28,4 @@ plans, subagents) add no question rounds, gates or helpers of their own. Workers
 their task.
 
 There is no listener, polling loop, timer or schedule: finished workers wake the orchestrator. The
-one background process is the installed watcher, which reports quiet workers.
+one background process is the installed watcher, which wakes the orchestrator for quiet workers.

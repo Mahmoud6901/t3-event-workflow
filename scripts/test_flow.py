@@ -1528,6 +1528,84 @@ class FlowTests(unittest.TestCase):
         self.assertEqual((cancel["tool"], cancel["arguments"]["taskId"]), ("task_cancel", self.runs[call["call"]]))
         self.assertEqual(fresh["tool"], "delegate_task")
 
+    def quiet(self, call, since="2026-11-23T09:00:00Z"):
+        """The watcher finds the worker this call started quiet since `since`. Returns what it would send."""
+        engine = flow.Flow(self.db, hub=lambda repo: self.hub, jev=self.advise)
+        try:
+            return engine.quiet(PROJECT, call["worker"], since, 30)
+        finally:
+            engine.close()
+
+    def test_a_quiet_implementer_is_replaced_once_without_you_and_a_quiet_replacement_blocks_its_task(self):
+        self.bind()
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertTrue(self.quiet(call)["send"])
+        cancel, fresh = self.start()
+        self.assertEqual((cancel["tool"], cancel["arguments"]["taskId"]), ("task_cancel", self.runs[call["call"]]))
+        self.assertEqual(fresh["tool"], "delegate_task")
+        self.assertNotEqual(fresh["worker"], call["worker"])
+        self.assertIn(f"{call['worker']}, the implementer of Fix the login typo (M30) was quiet since 2026-11-23T09:00:00Z, "
+                      f"so it was stopped and a new implementer took over.", self.last_step["tell"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
+        self.assertTrue(self.quiet(fresh, "2026-11-23T10:00:00Z")["send"])
+        (cancel,) = self.start()
+        self.assertEqual((cancel["tool"], cancel["worker"]), ("task_cancel", fresh["worker"]), "no third worker starts")
+        self.assertIn("Fix the login typo (M30) is blocked: its new implementer was quiet too, since 2026-11-23T10:00:00Z. "
+                      "Say restart to give it another implementer, or drop it.", self.last_step["tell"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["blocked"])
+        self.assertTrue(self.orchestrator("restart", task="Fix the login typo", authorization="Restart it.")["ok"])
+        (third,) = self.start()
+        self.assertEqual(third["tool"], "delegate_task")
+        self.assertTrue(self.quiet(third, "2026-11-23T11:00:00Z")["send"])
+        self.assertEqual([c["tool"] for c in self.start()], ["task_cancel", "delegate_task"],
+                         "your restart starts the count again")
+
+    def test_a_quiet_reviewer_is_replaced_and_a_reported_review_starts_its_count_again(self):
+        call, review, tree = self.to_review()
+        self.quiet(review)
+        cancel, fresh = self.start()
+        self.assertEqual((cancel["tool"], fresh["arguments"]["role"]), ("task_cancel", "review"))
+        self.assertIn("Review M30: Fix the login typo", fresh["arguments"]["title"])
+        self.assertTrue(self.worker("review", *worker_command(fresh), "--verdict", "changes",
+                                    "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
+        self.start()
+        worker, token, tree = self.implement(call, "export const name = 'fixed';\n", 7)
+        self.assertTrue(self.worker("pr", worker, token, "--pr", "7", path=tree)["ok"])
+        (second,) = self.start()
+        self.quiet(second)
+        self.assertEqual([c["tool"] for c in self.start()], ["task_cancel", "delegate_task"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["reviewing"])
+
+    def test_a_quiet_devops_worker_is_replaced_and_the_task_it_held_waits_for_the_new_one(self):
+        _, devops, _ = self.to_devops()
+        self.assertEqual(self.worker("take", *devops)["pr"], 7)
+        self.quiet({"worker": devops[0]})
+        cancel, fresh = self.start()
+        self.assertEqual((cancel["tool"], cancel["worker"]), ("task_cancel", devops[0]))
+        self.assertEqual((fresh["tool"], fresh["arguments"]["role"]), ("delegate_task", "general"))
+        self.assertIn(f"{devops[0]}, the DevOps worker of Fix the login typo (M30) was quiet since 2026-11-23T09:00:00Z, so "
+                      f"it was stopped and a new DevOps worker took over.", self.last_step["tell"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["confirmed"])
+        self.assertEqual(self.worker("take", *worker_command(fresh))["pr"], 7)
+        self.quiet(fresh, "2026-11-23T10:00:00Z")
+        (cancel,) = self.start()
+        self.assertEqual((cancel["tool"], cancel["worker"]), ("task_cancel", fresh["worker"]))
+        self.assertIn("Fix the login typo (M30) is blocked: its new DevOps worker was quiet too, since "
+                      "2026-11-23T10:00:00Z. Say restart to give it another DevOps worker, or drop it.", self.last_step["tell"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["blocked"])
+
+    def test_a_paused_binding_replaces_no_quiet_worker_and_tells_you(self):
+        self.bind()
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertTrue(self.orchestrator("control", action="pause")["ok"])
+        self.assertTrue(self.quiet(call)["send"])
+        self.assertEqual(self.start(), [])
+        self.assertTrue(any("has been quiet since" in line and "Say restart Fix the login typo" in line
+                            for line in self.last_step["tell"]), self.last_step["tell"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
+
     def test_devops_whose_run_ended_is_woken_by_the_next_confirmation(self):
         self.bind()
         self.queue("Fix the login typo", {"task": "Add a footer", "brief": "Add it.", "after": []})

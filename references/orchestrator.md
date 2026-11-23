@@ -30,9 +30,8 @@ Each wake gets the same step:
    out. Put each `ask` to them as it stands, with its id. Never answer one yourself.
 5. End your turn. Workers wake you when they finish; nothing needs polling.
 
-Your hook records each finished worker before your turn starts, so `next` already knows who ended. It
-holds the turn open while a call you made is not yet recorded, or while a worker's end arrived after
-your `next`. Then run `next` again.
+Your hook records each finished worker before your turn, so `next` knows who ended. It holds the turn
+open while a call you made is unrecorded or a worker's end came after your `next`: run `next` again.
 
 ## Planning with the user
 
@@ -83,7 +82,8 @@ Then run `next` and carry on with step 2 of [every wake](#every-wake).
   error needs their decision.
 - **A blocked task:** `tell` names it, and the user chooses: restart it, answer its question, or drop
   it.
-- **A quiet worker** (the watcher's message): tell the user, and restart it only on their word.
+- **A quiet worker** (the watcher's message): `next` replaces it once. If the new one goes quiet too, its
+  task is blocked.
 - **CI or GitHub trouble:** DevOps, or with it off the implementer, handles it and you wait. Its failures reach you as blocked tasks
   or problems.
 - **Anything you cannot fix from here** (a missing tool, a refused call you do not understand):
