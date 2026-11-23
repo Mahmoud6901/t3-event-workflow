@@ -77,6 +77,16 @@ class TaskAdviceTests(unittest.TestCase):
         self.assertNotIn("tier", asked)
         self.assertNotIn("cheap", asked)
 
+    def test_jev_matches_the_model_to_the_size_of_the_change_the_task_asks_for(self):
+        instructions = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task")["questions"]["implementer"][
+            "instructions"]
+        self.assertIn("matched to the size of the change the task asks for", instructions)
+        self.assertIn("not by how long its brief is or the rules every task of its plan repeats", instructions)
+        self.assertIn("A small, contained change", instructions)
+        self.assertIn("short, scoped coding work", instructions)
+        self.assertIn("long-running work", instructions)
+        self.assertNotIn("Capability comes first", instructions, "the strongest model no longer wins by default")
+
     def test_a_valid_choice_is_kept_and_an_invalid_one_is_left_to_the_harness(self):
         payload = jev.build_request(CONFIG, {}, "task")
         answer = envelope(payload, {"implementer": "gpt-6.2-astra"})

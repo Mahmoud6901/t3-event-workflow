@@ -96,11 +96,14 @@ def build_request(config, context, purpose="task", role="implementer"):
         raise ValueError("context must be JSON serializable") from None
     questions, scores = {}, _scores()
     options = {model_id: _label(model_id, spec, scores) for model_id, spec in _eligible(config, role).items()}
-    # No lean toward the defaults or toward the cheaper: Jev weighs every approved model by what it can do.
+    # No lean toward the defaults or toward the cheaper: Jev weighs every approved model by what it can do for this task.
     questions[role] = _choice(
-        f"Choose the approved {role} model most likely to get this task right the first time. Capability comes "
-        "first: a stronger model for difficult, risky, large or unclear work, and a lighter one only when it would "
-        f"do the task just as well, sooner. Price is not a reason either way. {_meaning(scores)}Choose even when "
+        f"Choose the approved {role} model most likely to get this task right the first time, matched to the size of "
+        "the change the task asks for. Judge that size by the change itself, not by how long its brief is or the rules "
+        "every task of its plan repeats. A small, contained change (a fix or tweak in a few places, with a clear "
+        "finish) goes to the model strongest on short, scoped coding work; a large, multi-step or open-ended one (a "
+        "feature across many files, a migration, a long investigation) goes to the model strongest on long-running "
+        f"work; between the two, weigh both. Price is not a reason either way. {_meaning(scores)}Choose even when "
         "uncertain, and report your confidence honestly.",
         options,
     )
