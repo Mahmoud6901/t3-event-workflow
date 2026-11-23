@@ -33,13 +33,14 @@ PROVIDERS = {"claudeAgent": ("Claude", "effort"), "codex": ("Codex", "reasoningE
              ANTIGRAVITY: ("Antigravity", "thought_level")}
 MATCHES = 20  # Models one search shows.
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-ROLES = ("implementer", "reviewer", "devops")
+ROLES = ("implementer", "reviewer", "devops", "lead")
+SPARE = ("lead",)  # Roles whose default may give way at setup to another approved model of the role that T3 runs.
 # The approved models and their roles. Only one with a card in assets/cards.json is approved: Jev reads it. A model T3
 # runs through more than one provider lists its routes in the order to try them, each with the model's id there
 # (its own by default); `provider` is its first. One card and one family serve every route. A goose route is paid
 # per token through OpenRouter; the rest are subscriptions.
 MODELS = {
-    "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer", "devops"], "routes": [
+    "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer", "devops", "lead"], "routes": [
         {"provider": "claudeAgent"}, {"provider": ANTIGRAVITY}, {"provider": GOOSE, "model": "anthropic/claude-opus-5.5"}]},
     "claude-sonnet-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer", "devops"], "routes": [
         {"provider": "claudeAgent"}, {"provider": ANTIGRAVITY}]},
@@ -50,7 +51,7 @@ MODELS = {
         {"provider": ANTIGRAVITY}, {"provider": GOOSE, "model": "google/gemini-4-neon"}]},
     "gemini-4-argon": {"provider": ANTIGRAVITY, "roles": ["implementer"]},
     "gemini-4-hydrogen": {"provider": ANTIGRAVITY, "roles": ["implementer"]},
-    "claude-fable-5-2": {"provider": "claudeAgent", "roles": []},  # Kept for a later lead role.
+    "claude-fable-5-2": {"provider": "claudeAgent", "roles": ["lead"]},
     "google/gemini-4-carbon": {"provider": GOOSE, "roles": ["implementer", "reviewer"]},
     "deepseek/deepseek-v4.1-flash": {"provider": GOOSE, "roles": ["implementer"]},
     "z-ai/glm-5.3-prime": {"provider": GOOSE, "roles": ["implementer"]},
@@ -58,7 +59,8 @@ MODELS = {
     "qwen/qwen4-max": {"provider": GOOSE, "roles": ["implementer"]},
 }
 DEFAULTS = {"implementerEffort": "xhigh", "reviewer": "gpt-6.2-astra", "reviewerEffort": "xhigh",
-            "devops": "claude-sonnet-5-5", "devopsEffort": "high"}  # No implementer model: Jev chooses it, else fallback().
+            "devops": "claude-sonnet-5-5", "devopsEffort": "high",
+            "lead": "claude-fable-5-2", "leadEffort": "high"}  # No implementer model: Jev chooses it, else fallback().
 SHIPPED = {"reviewer": "claude-opus-5-5"}  # Defaults an earlier version shipped, which a binding it made still stores.
 QUIET_MINUTES = 30
 NUDGES = 1  # Follow-ups asking a worker that ended without its closing command to finish; then the task is blocked.
@@ -66,6 +68,12 @@ REVIEW_ROUNDS = 3  # Reviews asking for changes before the user decides how the 
 ROUND_OPTIONS = ["carry on", "restart", "drop"]
 OPEN = ("waiting", "ready", "implementing", "review_needed", "reviewing", "approved", "asking", "confirmed",
         "merging", "ci_failed", "pipeline_wait", "blocked")
+FINISHED = ("merged", "dropped")
+# A spec waits for its lead to start, is being written, asks the user, or is blocked; then it is approved or dropped.
+SPEC_OPEN = ("waiting", "writing", "asking", "blocked")
+SPEC_OPTIONS = ["approve", "drop"]
+SPEC_CHARS = 4000  # The most a spec's text (goal, scope and questions) holds: every reviewer of its plan reads it.
+NAMES = {"devops": "DevOps worker"}  # A role's name in the user's lines, where it is not the role itself.
 
 
 class Refused(ValueError):
@@ -580,7 +588,7 @@ def loops(graph):
 
 def waits_forever(state):
     """Plans that wait for each other, or waiting tasks that do, through `after` or their plan's `dependsOn`."""
-    unfinished = {t["id"] for t in state["tasks"].values() if t["state"] not in {"merged", "dropped"}}
+    unfinished = {t["id"] for t in state["tasks"].values() if t["state"] not in FINISHED}
     tasks = {t["id"]: (set(t["after"]) | {o["id"] for o in state["tasks"].values()
                                           if o["plan"] in state["plans"][t["plan"]]["dependsOn"]}) & unfinished
              for t in state["tasks"].values() if t["state"] == "waiting"}
@@ -612,10 +620,11 @@ class Flow:
         # approved since joins, and one without a card leaves, a default on it giving way to the current one. An
         # implementer default an older version stored goes: Jev chooses that model. Jev weighs only the models T3 runs
         # at the time. A default an earlier version shipped moves to the current one once T3 runs it; a model the user
-        # picked stays theirs.
+        # picked stays theirs. A role added since gets its default.
         config["models"] = approved()
-        config["defaults"] = {key: DEFAULTS[key] if key in ROLES and key not in (config["models"].get(value) or {}).get(
-            "roles", []) else value for key, value in config["defaults"].items() if key in DEFAULTS}
+        config["defaults"] = {**DEFAULTS, **{key: DEFAULTS[key] if key in ROLES and key not in (
+            config["models"].get(value) or {}).get("roles", []) else value
+            for key, value in config["defaults"].items() if key in DEFAULTS}}
         for role, old in SHIPPED.items():
             new = DEFAULTS[role]
             if config["defaults"].get(role) == old and runs(t3_lists()[0], new, config["models"][new]["provider"]) is not False:
@@ -678,7 +687,7 @@ class Flow:
         handler = {"control": self.control, "queue_set": self.queue_set, "next": self.next, "done": self.done,
                    "status": self.status, "answer": self.answer, "ended": self.ended, "restart": self.restart,
                    "queue_edit": self.queue_edit, "setup_github": self.setup_github, "pick": self.pick,
-                   "devops": self.devops, "ci": self.ci, "guarded": self.guarded}.get(op)
+                   "devops": self.devops, "ci": self.ci, "guarded": self.guarded, "spec": self.spec}.get(op)
         require(handler, f"Unknown operation {op}")
         return handler(project, req)
 
@@ -706,7 +715,7 @@ class Flow:
                 if state["picks"].get(role, {}).get("model"):
                     continue
                 model = config["defaults"].get(role)
-                if model:
+                if model and role not in SPARE:
                     provider = models["models"][model]["provider"]
                     require(can_run(models, model, lists),
                             f"T3 cannot run {model}, the {role}'s default ({why.get(provider) or 'T3 does not list it'}). "
@@ -755,7 +764,7 @@ class Flow:
             picks = state.setdefault("picks", {})
             if "model" in raw and raw["model"] in CLEAR:
                 model = config["defaults"].get(role)
-                if model:
+                if model and role not in SPARE:
                     require(can_run(config, model, lists) is not False,
                             f"T3 cannot run {model}, the {role}'s default; pick another model")
                 else:
@@ -834,6 +843,80 @@ class Flow:
             state["control"] = {"activate": "active", "resume": "active", "pause": "paused", "stop": "stopped"}[action]
             return {"control": state["control"]}
         return self.transact(project, change, "control")
+
+    def spec(self, project, req):
+        """Work for the lead: it writes a spec and splits it into tasks, which wait for the user's approval before any
+        implementer starts. `request` is what the user asked for, in their words, and what the talk settled. With
+        `drop`, the plan's open spec is dropped instead."""
+        name = text(req.get("plan"), "plan")
+
+        def change(config, state):
+            specs = state.setdefault("specs", {})
+            spec = specs.get(name)
+            if req.get("drop") is True:
+                require(spec and spec["state"] in SPEC_OPEN, f"Plan {name} has no open spec")
+                self.drop_spec(state, spec, "you dropped it")
+                return {"spec": name, "state": spec["state"]}
+            request = text(req.get("request"), "request (what the user asked for, in their words, and what you settled)")
+            require(state["control"] == "active", "Starting work needs an active binding: activate or resume it on the "
+                                                  "user's own words first")
+            require(name not in state["plans"], f"Plan {name} is already queued; give the new plan another name")
+            require(not (spec and spec["state"] in SPEC_OPEN), f"Plan {name} already has an open spec")
+            specs[name] = {"id": name, "kind": "spec", "task": "Spec", "plan": name, "request": request,
+                           "state": "waiting", "rev": 0, "history": [], "lead": None, "draft": None, "answers": []}
+            return {"spec": name, "state": "waiting", "next": "Run next: it starts the lead."}
+        return self.transact(project, change, "spec")
+
+    def start_lead(self, config, state, spec, choice):
+        """A lead for the spec: read-only in the project folder, as a reviewer reads."""
+        worker = self.add_worker(config, state, "lead", spec["plan"], None, choice)
+        worker["spec"] = spec["id"]
+        worker["job"] = {"kind": "lead", "reported": False, "nudged": 0}
+        spec["lead"] = worker["id"]
+        self.move(spec, "writing")
+        self.delegate(config, state, worker, f"Lead: {spec['plan']}", "review", "shared", lead_brief(config, state, spec, worker))
+
+    def send_spec_fix(self, state, spec):
+        """The user's words on a submitted spec go to its lead, which revises it and submits it again."""
+        worker = state["workers"][spec["lead"]]
+        if not worker["childThreadId"]:
+            return  # Its start is not confirmed yet.
+        words = spec.pop("fix")
+        worker["job"] = {"kind": "lead", "reported": False, "nudged": 0}
+        self.send(state, worker, "revise", "\n".join([
+            f"The user's answer to your spec: {words}",
+            "Revise the spec and the plan to it, write the file again, and run: " + closing(worker, spec),
+            "When it succeeds, end your turn."]))
+
+    def drop_spec(self, state, spec, note):
+        """The spec ends without a plan: its lead is let go and its question closes."""
+        lead = state["workers"].get(spec.get("lead"))
+        if lead and lead["state"] != "cancelled":
+            self.retire(state, lead, f"the spec of plan {spec['plan']} was dropped", let_finish=True)
+        for ask in state["asks"].values():
+            if ask.get("spec") == spec["id"] and not ask.get("answered"):
+                ask["answered"] = "dropped"
+        spec.pop("fix", None)
+        self.move(spec, "dropped", note)
+        state["tell"].append(f"Dropped the spec of plan {spec['plan']}.")
+
+    def approve_spec(self, state, spec):
+        """The user approved the spec: its plan joins the queue, as queue_set or queue_edit adds a plan, and its tasks
+        start by the usual rules. The plan keeps the spec for its workers' briefs."""
+        draft = spec["draft"]
+        try:
+            self.add_plan(state, {"plan": spec["plan"], "owns": draft["owns"], "dependsOn": draft["dependsOn"],
+                                  "tasks": draft["tasks"]})
+        except Refused as error:
+            raise Refused(f"The spec's plan cannot be queued now: {error}. Answer with what to change, so the lead "
+                          f"revises it, or drop it.") from None
+        state["plans"][spec["plan"]]["spec"] = {"goal": draft["goal"], "text": draft["text"]}
+        lead = state["workers"].get(spec.get("lead"))
+        if lead and lead["state"] != "cancelled":
+            self.retire(state, lead, "its spec was approved", let_finish=True)
+        self.move(spec, "approved", "the user approved it")
+        count = len(draft["tasks"])
+        state["tell"].append(f"Plan {spec['plan']} is queued from its approved spec: {count} task{'s' if count != 1 else ''}.")
 
     def queue_set(self, project, req):
         plans = req.get("plans")
@@ -927,7 +1010,7 @@ class Flow:
         """Links queue_edit takes off a waiting task. One to unfinished work needs `why`, kept for the task's implementer,
         its reviewer and status. One its implementer put back with worker waits stays unless the user asks: then their
         own words come as `authorization`."""
-        unfinished = [a for a in removed if state["tasks"][a]["state"] not in {"merged", "dropped"}]
+        unfinished = [a for a in removed if state["tasks"][a]["state"] not in FINISHED]
         if not unfinished:
             return
         names = ", ".join(state["tasks"][a]["task"] for a in unfinished)
@@ -973,6 +1056,8 @@ class Flow:
                 task = self.owing(state, worker)
                 back.add((worker["role"], task and task["id"]))
         ready |= {task_id for role, task_id in back if role == "implementer"}
+        leads = sorted({name for name, spec in (state.get("specs") or {}).items() if spec["state"] == "waiting"}
+                       | {name for role, name in back if role == "lead"})
         if state["control"] == "active":
             gh = self.hub_for(config["github"]["repo"])
             for task in state["tasks"].values():
@@ -989,13 +1074,16 @@ class Flow:
                 devops_on(state, name) and state["devops"].get(name, {}).get("state", "none") == "none"
                 and any(t["plan"] == name and t["state"] in {"approved", "confirmed", "ci_failed"}
                         for t in state["tasks"].values()) for name in state["plans"])
-            if ready or reviews or merges:
+            if ready or reviews or merges or leads:
                 lists, spent = t3_lists()[0], limits_now(state)
                 waits = {role: out_until(config, state, role, spent, lists) for role in ROLES}
                 for role, task_ids in (("implementer", sorted(ready)), ("reviewer", reviews)):
                     for task_id in task_ids if not waits[role] else ():
                         choices[role, task_id] = self.advise(config, state, role, described(state["tasks"][task_id]),
                                                              lists, spent)
+                for name in leads if not waits["lead"] else ():
+                    choices["lead", name] = self.advise(config, state, "lead", {
+                        "request": state["specs"][name]["request"], "plan": name}, lists, spent)
                 if merges and not waits["devops"]:  # One DevOps serves a whole plan, so its stand-in is not a task's.
                     choices["devops"] = self.advise(config, state, "devops", {
                         "request": "Merge the plan's confirmed pull requests through GitHub and triage CI failures"},
@@ -1040,6 +1128,11 @@ class Flow:
                         self.confirm(state, task, *facts[task["id"]][1:])
                     elif task["state"] == "implementing" and task.get("fix"):
                         self.send_fix(config, state, task)
+                for spec in (state.get("specs") or {}).values():
+                    if spec["state"] == "waiting" and not held(spec, "lead", f"The spec of plan {spec['plan']}"):
+                        self.start_lead(config, state, spec, choices.get(("lead", spec["id"])))
+                    elif spec["state"] == "writing" and spec.get("fix"):
+                        self.send_spec_fix(state, spec)
                 self.call_devops(config, state, choices.get("devops"), lambda entry, name: held(entry, "devops", f"Plan {name}"))
             summary = self.stop_summary(state)
             calls = list(state["calls"].values())
@@ -1112,8 +1205,11 @@ class Flow:
         return self.transact(project, change, "ended")
 
     def restart(self, project, req):
-        """On your word: the task's current worker is cancelled and a new one in the same role takes over."""
+        """On your word: the task's current worker is cancelled and a new one in the same role takes over. With `spec`,
+        the spec's lead."""
         text(req.get("authorization"), "authorization (the user's own words)")
+        if req.get("spec") is not None:
+            return self.restart_lead(project, text(req["spec"], "spec (the plan whose lead restarts)"))
         name = text(req.get("task"), "task")
 
         def role_of(task):
@@ -1152,6 +1248,29 @@ class Flow:
             return {"task": task["id"], "state": task["state"]}
         return self.transact(project, change, "restart")
 
+    def restart_lead(self, project, name):
+        """A new lead takes over a spec that is being written or is blocked, told the earlier draft and answers."""
+        config, state = self.load(project)
+        spent = limits_now(state)
+        request = ((state.get("specs") or {}).get(name) or {}).get("request")
+        advice = self.advise(config, state, "lead", {"request": request, "plan": name}, t3_lists()[0], spent) \
+            if spent and request else {}
+
+        def change(config, state):
+            spec = (state.get("specs") or {}).get(name)
+            require(spec, f"Plan {name} has no spec")
+            require(spec["state"] in {"writing", "blocked"}, f"The spec of plan {name} is {spec['state']}; no lead of it "
+                                                            "can be restarted")
+            old = state["workers"].get(spec.get("blockedWorker") or spec.get("lead"))
+            if old:
+                self.retire(state, old, "restarted on the user's word")
+            uncount(spec, "lead")
+            for key in ("blockedFrom", "blockedWorker", "fix"):  # The new lead's brief holds the user's answers.
+                spec.pop(key, None)
+            self.start_lead(config, state, spec, advice)
+            return {"spec": name, "state": spec["state"]}
+        return self.transact(project, change, "restart")
+
     def retire(self, state, worker, reason, let_finish=False):
         """The worker is done for: its unmade calls are withdrawn and a run still going is cancelled. With let_finish,
         a run that already reported is left to end on its own."""
@@ -1172,10 +1291,14 @@ class Flow:
             uncount(state["devops"].get(me["plan"]), "devops")
 
     def owing(self, state, worker):
-        """The task this worker still owes its closing command for, or None."""
+        """The task this worker still owes its closing command for (for a lead, its spec), or None."""
         if worker["role"] == "devops":
             return next((t for t in state["tasks"].values() if t["state"] == "merging" and t.get("devops") == worker["id"]),
                         None)
+        if worker["role"] == "lead":
+            spec = (state.get("specs") or {}).get(worker.get("spec"))
+            return spec if spec and spec.get("lead") == worker["id"] and spec["state"] == "writing" and not spec.get("fix") \
+                else None
         task = state["tasks"].get(worker["task"])
         owes = {"implementer": "implementing", "reviewer": "reviewing"}[worker["role"]]
         return task if task and task.get(worker["role"]) == worker["id"] and task["state"] == owes and not task.get("fix") \
@@ -1206,9 +1329,10 @@ class Flow:
             return
         task["blockedFrom"], task["blockedWorker"] = task["state"], worker["id"]
         task.pop("devops", None)
-        self.move(task, "blocked", f"its {worker['role']} ended twice without reporting")
-        state["tell"].append(f"{task['task']} ({task['plan']}) is blocked: its {worker['role']} ended twice without "
-                             f"reporting. Say restart to give it a new {worker['role']}, or drop it.")
+        name = NAMES.get(worker["role"], worker["role"])
+        self.move(task, "blocked", f"its {name} ended twice without reporting")
+        state["tell"].append(f"{task['task']} ({task['plan']}) is blocked: its {name} ended twice without "
+                             f"reporting. Say restart to give it a new {name}, or drop it.")
 
     def put_back(self, state, worker, task, wait):
         """The worker's run stopped at its model's quota: it goes, and its work goes back to where `next` starts a new
@@ -1220,9 +1344,9 @@ class Flow:
         if role == "devops":
             self.devops_back(state, worker["plan"], task, why)
         else:
-            self.move(task, "waiting" if role == "implementer" else "review_needed", why)
+            self.move(task, "review_needed" if role == "reviewer" else "waiting", why)
         label = f"{task['task']} ({task['plan']})" if task else f"Plan {worker['plan']}"
-        then = "" if wait else f" A new {'DevOps worker' if role == 'devops' else role} starts on a model with capacity."
+        then = "" if wait else f" A new {NAMES.get(role, role)} starts on a model with capacity."
         state["tell"].append(f"{label}: {why}, which resets at {until}.{then}")
 
     def devops_back(self, state, plan, task, why):
@@ -1245,6 +1369,8 @@ class Flow:
         def change(config, state):
             ask = state["asks"].get(ask_id)
             require(ask and not ask.get("answered"), f"No open question {ask_id}")
+            if ask["kind"] == "spec":
+                return self.answer_spec(state, ask, reply)
             task = state["tasks"][ask["task"]]
             if ask["kind"] in {"outside", "rounds"}:
                 require(reply in ask["options"], f"Answer {ask_id} with {', '.join(ask['options'])}")
@@ -1279,6 +1405,22 @@ class Flow:
             ask["answered"] = reply
             return {"task": task["id"], "state": task["state"]}
         return self.transact(project, change, "answer")
+
+    def answer_spec(self, state, ask, reply):
+        """The user's answer to a submitted spec: approve queues its plan, drop ends it, and any other words go to its
+        lead, which revises the spec and submits it again."""
+        spec = state["specs"][ask["spec"]]
+        require(spec["state"] == "asking", f"The spec of plan {spec['plan']} is no longer waiting for this answer")
+        if reply == "approve":
+            self.approve_spec(state, spec)
+        elif reply == "drop":
+            self.drop_spec(state, spec, "you dropped it")
+        else:
+            spec["answers"] = [*spec.get("answers", []), reply]
+            spec["fix"] = reply
+            self.move(spec, "writing", "you asked for changes")
+        ask["answered"] = reply
+        return {"spec": spec["plan"], "state": spec["state"]}
 
     def ask_rounds(self, state, task):
         """The reviewer asked for changes REVIEW_ROUNDS times since the user last decided: the task waits for them."""
@@ -1386,7 +1528,7 @@ class Flow:
         role, as a restart does, and that work counts one replacement. The next time, its task is blocked for the user."""
         role, since = worker["role"], worker["quiet"]["since"]
         label, _ = worker_label(state, worker)
-        name = "DevOps worker" if role == "devops" else role
+        name = NAMES.get(role, role)
         why = f"its {name} was quiet since {since}"
         self.retire(state, worker, why)
         if act == "block":
@@ -1400,7 +1542,7 @@ class Flow:
         if role == "devops":
             self.devops_back(state, worker["plan"], task, why)
         else:
-            self.move(task, "waiting" if role == "implementer" else "review_needed", why)
+            self.move(task, "review_needed" if role == "reviewer" else "waiting", why)
         item = task or state["devops"][worker["plan"]]
         item["quietReplaced"] = [*(item.get("quietReplaced") or []), role]
         then = "a new DevOps worker starts when there is work" if role == "devops" and not task else f"a new {name} took over"
@@ -1421,6 +1563,9 @@ class Flow:
                 "dependsOn": {name: p["dependsOn"] for name, p in state["plans"].items() if p["dependsOn"]},
                 "tasks": [{k: t.get(k) for k in ("id", "plan", "task", "state", "after", "unlinked", "needed", "pr", "head", "held")}
                           for t in state["tasks"].values()],
+                "specs": [{"plan": s["plan"], "state": s["state"], "lead": s.get("lead"),
+                           "goal": (s.get("draft") or {}).get("goal"), **({"held": s["held"]} if s.get("held") else {})}
+                          for s in (state.get("specs") or {}).values()],
                 "working": sorted(w["id"] for w in state["workers"].values() if w["state"] == "working"),
                 "models": {role: role_model(config, state, role) for role in ROLES}, "devops": state.get("devopsOn", True),
                 "ci": state.get("ciOn", True), "guarded": state.get("guarded") or [], "pendingCalls": len(state["calls"]), "openAsks": [a for a in state["asks"].values() if not a.get("answered")],
@@ -1429,7 +1574,7 @@ class Flow:
     def unblocked(self, state, task):
         plan = state["plans"][task["plan"]]
         return (all(state["plans"][p]["status"] == "done" for p in plan["dependsOn"])
-                and all(state["tasks"][a]["state"] in {"merged", "dropped"} for a in task["after"]))
+                and all(state["tasks"][a]["state"] in FINISHED for a in task["after"]))
 
     def parked(self, state, task):
         """The implementer of a task that waits since it ran worker waits, while a follow-up can still reach it."""
@@ -1459,7 +1604,7 @@ class Flow:
         task["history"].append({"at": now(), "from": task["state"], "to": to, **({"note": note} if note else {})})
         task["state"] = to
         task["rev"] += 1
-        if to in {"merged", "dropped"}:
+        if to in FINISHED and task.get("kind") != "spec":  # A spec moves like a task, but the record counts tasks.
             self.finished.append(task["id"])
 
     def add_worker(self, config, state, role, plan, task_id, choice=None):
@@ -1571,7 +1716,7 @@ class Flow:
         task["reviewer"] = worker["id"]
         self.move(task, "reviewing")
         self.delegate(config, state, worker, f"Review {task['plan']}: {task['task']}", "review", "shared",
-                      reviewer_brief(config, task, worker))
+                      reviewer_brief(config, task, worker, state["plans"][task["plan"]].get("spec")))
 
     def other_family(self, config, state, task, worker):
         """A reviewer whose model is of the same family as the model that wrote the PR (its implementer's; for a pipeline
@@ -1689,10 +1834,13 @@ class Flow:
     def worker(self, command, args):
         project, worker = self.find_worker(args["worker"], args["token"])
         handler = {"pr": self.pr, "stuck": self.stuck, "waits": self.waits, "review": self.review, "take": self.take,
-                   "update": self.update, "merge": self.merge, "failed": self.failed, "pipeline": self.pipeline}.get(command)
+                   "update": self.update, "merge": self.merge, "failed": self.failed, "pipeline": self.pipeline,
+                   "submit": self.submit}.get(command)
         require(handler, f"{command} is not available yet")
         if command in {"take", "update", "merge", "failed", "pipeline"}:
             require(worker["role"] == "devops", f"Only DevOps runs {command}")
+        if command == "submit":
+            require(worker["role"] == "lead", "Only a lead runs submit")
         if command == "waits":
             require(worker["role"] == "implementer", "Only an implementer runs waits")
         return handler(project, worker, args)
@@ -1843,6 +1991,70 @@ class Flow:
             return {"state": "waiting", "next": f"When {names} {'merge' if len(needs) > 1 else 'merges'}, a follow-up "
                                                 "wakes you here to carry on. End your turn."}
         return self.transact(project, change, "waits")
+
+    def submit(self, project, worker, args):
+        """The lead's spec and plan, from its JSON file: checked as queue_set checks a plan, then put to the user."""
+        path = text(args.get("file"), "--file (the JSON file with the spec and the plan)")
+        try:
+            raw = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+        except OSError as error:
+            raise Refused(f"Cannot read {path}: {error.strerror or error}. Write the file and run this again") from None
+        except ValueError as error:
+            raise Refused(f"{path} is not valid JSON ({error}). Fix it and run this again") from None
+
+        def change(config, state):
+            spec = (state.get("specs") or {}).get(worker.get("spec"))
+            require(spec and spec.get("lead") == worker["id"] and spec["state"] == "writing",
+                    "This spec is not waiting for you; end your turn")
+            spec["draft"] = self.spec_draft(state, spec["plan"], raw)
+            self.reported(state, worker, spec)
+            self.move(spec, "asking", "its lead submitted it")
+            ask_id = next_id(state, "a")
+            state["asks"][ask_id] = {"id": ask_id, "task": None, "spec": spec["id"], "kind": "spec",
+                                     "question": spec_question(spec), "options": list(SPEC_OPTIONS)}
+            return {"state": "asking", "next": "The spec goes to the user. If they ask for changes, a follow-up brings "
+                                               "their words here. End your turn."}
+        return self.transact(project, change, "submit")
+
+    def spec_draft(self, state, name, raw):
+        """A lead's file as a spec and its plan, checked as queue_set checks a plan and on a copy of the queue, so
+        nothing is queued yet. Each refusal says what to fix in the file."""
+        def check(ok, message):
+            require(ok, f"{message}. Fix the file and run this again.")
+        check(isinstance(raw, dict), "The file holds one JSON object with goal, inScope, outOfScope, questions, owns, "
+                                     "dependsOn and tasks")
+        check(isinstance(raw.get("goal"), str) and raw["goal"].strip(), "goal says in a few sentences what the work is for")
+        found = {}
+        for key in ("inScope", "outOfScope", "questions"):
+            value = raw.get(key) or []
+            check(isinstance(value, list) and all(isinstance(v, str) and v.strip() for v in value),
+                  f"{key} lists short texts; [] for none")
+            found[key] = [v.strip() for v in value]
+        tasks = raw.get("tasks")
+        check(isinstance(tasks, list) and tasks and all(isinstance(t, dict) for t in tasks), "tasks lists the plan's tasks")
+        names = [t.get("task").strip() if isinstance(t.get("task"), str) else None for t in tasks]
+        check(all(names), "Each task has a name in task")
+        check(len(set(names)) == len(names), "Each task's name is its own: two tasks share one")
+        for task in tasks:
+            check(isinstance(task.get("brief"), str) and task["brief"].strip(),
+                  f"Task {task['task']} needs a brief: what to change and how to tell it is done")
+            owns = task.get("owns")
+            check(owns is None or (isinstance(owns, list) and owns and all(isinstance(o, str) and o for o in owns)),
+                  f"Task {task['task']}: owns lists the paths it may change")
+            check(isinstance(task.get("after") or [], list), f"Task {task['task']}: after lists the tasks it waits for")
+        owns = raw.get("owns") or list(dict.fromkeys(o for t in tasks for o in t.get("owns") or []))
+        plan = {"plan": name, "owns": owns, "dependsOn": raw.get("dependsOn") or [], "tasks": [
+            {"task": t["task"].strip(), "brief": t["brief"].strip(), **({"owns": t["owns"]} if t.get("owns") else {}),
+             "after": t.get("after") or []} for t in tasks]}
+        try:
+            self.add_plan(copy.deepcopy(state), copy.deepcopy(plan))
+        except Refused as error:
+            check(False, f"The plan is refused: {error}")
+        words = spec_text(raw["goal"].strip(), found)
+        check(len(words) <= SPEC_CHARS, f"The spec's text (goal, scope and questions) is {len(words)} characters; keep it "
+                                        f"within {SPEC_CHARS}")
+        return {"goal": raw["goal"].strip(), **found, "text": words, "owns": plan["owns"],
+                "dependsOn": plan["dependsOn"], "tasks": plan["tasks"]}
 
     def submitted(self, config, project, name, args, decisions=False):
         """A worker's PR as it stands: open against the bound branch, with a Decisions section in its body when
@@ -2141,7 +2353,9 @@ class Flow:
         config, state = self.load(project)
         due = sorted(f"{item}@{until}" for item, until in [
             *((t["id"], t.get("held")) for t in state["tasks"].values() if t["state"] in {"waiting", "review_needed"}),
-            *((f"devops:{name}", entry.get("held")) for name, entry in state["devops"].items() if entry["state"] == "none")]
+            *((f"devops:{name}", entry.get("held")) for name, entry in state["devops"].items() if entry["state"] == "none"),
+            *((f"spec:{name}", spec.get("held")) for name, spec in (state.get("specs") or {}).items()
+              if spec["state"] == "waiting")]
             if until and passed(until))
         key = ",".join(due)
         if state["control"] != "active" or not due or state.get("resetWoken") == key:
@@ -2258,7 +2472,7 @@ class Flow:
     def finish_plan(self, state, name):
         plan = state["plans"][name]
         tasks = [t for t in state["tasks"].values() if t["plan"] == name]
-        if plan["status"] == "done" or any(t["state"] not in {"merged", "dropped"} for t in tasks):
+        if plan["status"] == "done" or any(t["state"] not in FINISHED for t in tasks):
             return
         plan["status"] = "done"
         merged = sum(1 for t in tasks if t["state"] == "merged")
@@ -2270,24 +2484,32 @@ class Flow:
         start, no call pending, every task finished or waiting on the user), one line for them, what waits for them
         first, then how many tasks merged and how many were dropped. Told again only after something moved."""
         tasks = list(state["tasks"].values())
-        unfinished = [t for t in tasks if t["state"] not in {"merged", "dropped"}]
-        if (state["control"] != "active" or not tasks or state["calls"]
+        specs = list((state.get("specs") or {}).values())
+        unfinished = [t for t in tasks if t["state"] not in FINISHED]
+        open_specs = [s for s in specs if s["state"] in SPEC_OPEN]
+        if (state["control"] != "active" or not (tasks or specs) or state["calls"]
                 or any(w["state"] in {"working", "prepared"} for w in state["workers"].values())
                 or any(t["state"] not in {"asking", "blocked", "waiting", "pipeline_wait"} or t.get("held")
-                       for t in unfinished)):
+                       for t in unfinished)
+                or any(s["state"] not in {"asking", "blocked"} for s in open_specs)):
             state.pop("stopped", None)
             return None
         asks = sorted((a for a in state["asks"].values() if not a.get("answered")), key=lambda a: int(a["id"][1:]))
-        key = json.dumps([sorted([t["id"], t["state"]] for t in tasks), [a["id"] for a in asks]])
+        key = json.dumps([sorted([t["id"], t["state"]] for t in tasks), sorted([s["id"], s["state"]] for s in specs),
+                          [a["id"] for a in asks]])
         if state.get("stopped") == key:
             return None
         state["stopped"] = key
         merged = sum(1 for t in tasks if t["state"] == "merged")
-        counts = f"{merged} merged, {len(tasks) - merged - len(unfinished)} dropped"
-        if not unfinished:
+        counts = f"{merged} merged, {sum(1 for t in tasks if t['state'] == 'dropped')} dropped"
+        if not unfinished and not open_specs:
             return f"Summary: the queue is finished: {counts}."
         waiting = [f"{a['id']} ({ask_words(state, a)})" for a in asks]
         asked = {a["task"] for a in asks}
+        for spec in open_specs:
+            if spec["state"] == "blocked":
+                why = next((h.get("note") for h in reversed(spec["history"]) if h["to"] == "blocked"), None)
+                waiting.append(f"the spec of plan {spec['plan']} is blocked" + (f": {why}" if why else ""))
         for task in unfinished:
             if task["state"] == "blocked" and task["id"] not in asked:
                 why = next((h.get("note") for h in reversed(task["history"]) if h["to"] == "blocked"), None)
@@ -2300,6 +2522,8 @@ class Flow:
 
 def ask_words(state, ask):
     """A few words for an open question in the stop summary."""
+    if ask["kind"] == "spec":
+        return f"the spec of plan {ask['spec']}: approve, drop or say what to change"
     task = state["tasks"][ask["task"]]
     if ask["kind"] == "outside":
         return f"PR #{task.get('pr')} of {task['task']}: merge, back or drop"
@@ -2352,7 +2576,7 @@ def unlinked_lines(task, implementer):
 
 def waits_line(state, task, me):
     """How an implementer waits for another open task's code, with the tasks it could name."""
-    others = sorted((t for t in state["tasks"].values() if t["id"] != task["id"] and t["state"] not in {"merged", "dropped"}),
+    others = sorted((t for t in state["tasks"].values() if t["id"] != task["id"] and t["state"] not in FINISHED),
                     key=lambda t: t["plan"] != task["plan"])  # Its own plan first.
     if not others:
         return None
@@ -2384,6 +2608,7 @@ def implementer_brief(config, state, task, worker):
         f"You are the implementer of one task in the t3 workflow. First read {slash(ROOT / 'references' / 'implementer.md')}.",
         f"Plan: {task['plan']}. Task: {task['task']}.",
         f"Brief: {task['brief'] or task['task']}",
+        *([f"The plan's goal: {spec['goal']}"] if (spec := state["plans"][task["plan"]].get("spec")) else []),
         f"Paths you may change: {', '.join(task['owns'])}.",
         *unlinked_lines(task, implementer=True),
         start[0],
@@ -2408,7 +2633,7 @@ def worker_label(state, worker):
         task = next((t for t in state["tasks"].values() if t["state"] == "merging" and t.get("devops") == worker["id"]), None)
     else:
         task = state["tasks"].get(worker["task"])
-    role = {"devops": "DevOps worker"}.get(worker["role"], worker["role"])
+    role = NAMES.get(worker["role"], worker["role"])
     return f"{worker['id']}, the {role} of " + (f"{task['task']} ({task['plan']})" if task else f"plan {worker['plan']}"), task
 
 
@@ -2422,7 +2647,7 @@ def started_line(state, worker):
     """The user's line for a worker whose start T3 confirmed: its role, its task, its model (and its route when it is
     not the model's first) and effort, and why that model. A stand-in names only the model it stands in for: the
     usage-limit line already said the rest. A paid route says so, unless the user picked the model."""
-    role = {"implementer": "Implementer", "reviewer": "Reviewer", "devops": "DevOps"}[worker["role"]]
+    role = {"implementer": "Implementer", "reviewer": "Reviewer", "devops": "DevOps", "lead": "Lead"}[worker["role"]]
     task = state["tasks"].get(worker.get("task"))
     what = f"{task['task']} ({task['plan']})" if task else f"plan {worker['plan']}"
     why = WHY_MODEL.get(worker.get("modelSource"))
@@ -2446,6 +2671,8 @@ def closing(worker, task):
                   f"if you cannot go on for another reason: {command('worker', 'stuck', me, '--why', QUESTION)})")
     if worker["role"] == "reviewer":
         return command("worker", "review", me, "--verdict", "approve|changes", "--sha", task["head"])
+    if worker["role"] == "lead":
+        return command("worker", "submit", me, "--file", SPEC_FILE)
     return (f"{command('worker', 'merge', me)} once CI passes on PR #{task['pr']}, or "
             f"{command('worker', 'failed', me, '--cause', 'task|pipeline', '--detail', QUESTION.replace('question', 'what failed'))}")
 
@@ -2505,13 +2732,16 @@ def reviewed_before(config, task, tree):
             f"git -C {tree} diff {reviews[-1]['sha']} {task['head']}"]
 
 
-def reviewer_brief(config, task, worker):
+def reviewer_brief(config, task, worker, spec=None):
+    """`spec` is the plan's approved spec, which a task of the plan is judged against too."""
     me = f"--worker {worker['id']} --token {worker['token']}"
     tree, head, branch = slash(task["worktree"]), task["head"], config["branch"]
     return "\n".join([
         f"You are the reviewer of one task in the t3 workflow. First read {slash(ROOT / 'references' / 'reviewer.md')}.",
         f"Plan: {task['plan']}. Task: {task['task']}.",
         f"Brief: {task['brief'] or task['task']}",
+        *([f"The plan's spec, which this task serves; judge the change against it too:\n{spec['text']}"]
+          if spec and task.get("kind") != "pipeline" else []),
         f"Paths it may change: {', '.join(task['owns'])}.",
         *[f"This task waited for {n['name']} ({n['why']}). If the PR stubs, fakes or copies code that {n['name']} "
           f"builds, request changes and name it." for n in task.get("needed") or []
@@ -2531,4 +2761,58 @@ def reviewer_brief(config, task, worker):
         f"Post your findings as one comment: gh pr comment {task['pr']} --repo {config['github']['repo']} --body \"...\"",
         f"Then run {command('worker', 'review', me, '--verdict', 'approve', '--sha', head)} "
         f"or the same with --verdict changes, and end your turn.",
+    ])
+
+
+SPEC_FILE = '"<the JSON file>"'
+SPEC_EXAMPLE = json.dumps({
+    "goal": "What the work is for, in a few sentences", "inScope": ["What it does"], "outOfScope": ["What it leaves"],
+    "questions": ["What the user must decide; [] for none"], "owns": ["src/"], "dependsOn": [],
+    "tasks": [{"task": "Add the table", "brief": "What to change and how to tell it is done", "owns": ["db/"]},
+              {"task": "Show it", "brief": "...", "owns": ["src/ui/"], "after": ["Add the table"]}]})
+
+
+def spec_text(goal, found):
+    """A spec as the user and each reviewer of its plan read it."""
+    def joined(items):
+        return "; ".join(items) if items else "none"
+    return "\n".join([f"Goal: {goal}", f"In scope: {joined(found['inScope'])}", f"Out of scope: {joined(found['outOfScope'])}",
+                      f"Open questions: {joined(found['questions'])}"])
+
+
+def spec_question(spec):
+    """The user's question on a submitted spec: its goal, each task with its paths and what it waits for, and any
+    open questions."""
+    draft = spec["draft"]
+    lines = [f"The lead's spec for plan {spec['plan']}.", f"Goal: {draft['goal']}", "Tasks:"]
+    for number, task in enumerate(draft["tasks"], 1):
+        waits = f"waits for {', '.join(task['after'])}" if task["after"] else "starts at once"
+        lines.append(f"{number}. {task['task']} (paths: {', '.join(task.get('owns') or draft['owns'])}; {waits})")
+    if draft["dependsOn"]:
+        lines.append(f"The plan waits for plan {', '.join(draft['dependsOn'])} to finish.")
+    lines.append("Open questions: " + ("; ".join(draft["questions"]) if draft["questions"] else "none."))
+    lines.append("Approve it, drop it, or say what to change.")
+    return "\n".join(lines)
+
+
+def lead_brief(config, state, spec, worker):
+    me = f"--worker {worker['id']} --token {worker['token']}"
+    queued = sorted((t for t in state["tasks"].values() if t["state"] not in FINISHED), key=lambda t: int(t["id"][1:]))
+    earlier = spec.get("draft")
+    return "\n".join([
+        f"You are the lead of plan {spec['plan']} in the t3 workflow. First read {slash(ROOT / 'references' / 'lead.md')}.",
+        f"The user's request: {spec['request']}",
+        *([f"An earlier spec for it:\n{earlier['text']}"] if earlier else []),
+        *[f"The user answered an earlier spec: {words}" for words in spec.get("answers") or []],
+        f"Read the project in {slash(config['workspace'])} and its instructions. Edit nothing there: no files, commits "
+        f"or pushes.",
+        *([f"Tasks already queued, which a task of yours may wait for by name in after: "
+           + "; ".join(f"{t['task']} ({t['plan']})" for t in queued[:20])] if queued else []),
+        *([f"Plans already queued, which yours may wait for in dependsOn: {', '.join(state['plans'])}."]
+          if state["plans"] else []),
+        "Write the spec and the plan as one JSON object in a file in your temporary folder, outside the project, in "
+        f"this form: {SPEC_EXAMPLE}",
+        f"Keep the spec's text (goal, scope and questions) within {SPEC_CHARS} characters.",
+        f"Then run: {command('worker', 'submit', me, '--file', SPEC_FILE)}",
+        "If it refuses, fix the file and run it again. When it succeeds, end your turn: the spec goes to the user.",
     ])

@@ -77,7 +77,7 @@ def parser():
     sub = top.add_subparsers(dest="mode")
     worker = sub.add_parser("worker")
     worker.add_argument("command", choices=["pr", "stuck", "waits", "review", "take", "update", "merge", "failed",
-                                            "pipeline"])
+                                            "pipeline", "submit"])
     worker.add_argument("--worker", required=True)
     worker.add_argument("--token", required=True)
     worker.add_argument("--pr", type=int)
@@ -88,6 +88,7 @@ def parser():
     worker.add_argument("--cause", choices=["task", "pipeline"])
     worker.add_argument("--detail")
     worker.add_argument("--path", help="The worker's checkout; the folder the command runs in by default")
+    worker.add_argument("--file", help="submit: the lead's JSON file with the spec and the plan")
     return top
 
 

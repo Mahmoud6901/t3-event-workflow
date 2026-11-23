@@ -13,7 +13,7 @@ When it applies, find your place below:
 
 - **You are the bound orchestrator** when your hook adds the "T3 workflow orchestrator" note to your
   context. Follow [orchestrator.md](orchestrator.md) and the [protocol](protocol.md).
-- **You are a worker** (implementer, reviewer or DevOps) when your task came from a brief that names
+- **You are a worker** (lead, implementer, reviewer or DevOps) when your task came from a brief that names
   your role's doc. Follow that brief and doc. Nothing else here applies to you, and you never set up
   or run the workflow yourself.
 - **The project has no binding**, and you are a Claude or Codex session: set it up with

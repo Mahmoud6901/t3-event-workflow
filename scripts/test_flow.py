@@ -938,8 +938,10 @@ class FlowTests(unittest.TestCase):
     # Helpers that play the workers and T3.
 
     def queue(self, *tasks, owns=("src/",)):
+        """The orchestrator queues plan M30; more than one task carries the user's words to skip the spec."""
         self.assertTrue(self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": list(owns), "tasks": [
-            {"task": t, "brief": f"Do {t}."} if isinstance(t, str) else t for t in tasks]}])["ok"])
+            {"task": t, "brief": f"Do {t}."} if isinstance(t, str) else t for t in tasks]}],
+            **({"noSpec": "No spec for these."} if len(tasks) > 1 else {}))["ok"])
 
     def start(self, tool="delegate_task"):
         """next, then T3 runs each call: the orchestrator confirms them with done. Returns the calls."""
@@ -2176,6 +2178,200 @@ class FlowTests(unittest.TestCase):
         result = self.worker("pr", worker, token, "--pr", "7", path=tree)
         self.assertFalse(result["ok"])
         self.assertIn("uncommitted", result["error"])
+
+    # The lead: a spec and its plan, which the user approves before any implementer starts.
+
+    REQUEST = "Users sign in with their name; split it as you see fit."
+
+    def spec_file(self, **changes):
+        """The lead's JSON file, in its temporary folder."""
+        plan = {"goal": "Let users sign in with a name.", "inScope": ["The login form"], "outOfScope": ["Sign-up"],
+                "questions": [], "owns": ["src/"], "tasks": [
+                    {"task": "Fix the login typo", "brief": "Rename nmae to name in src/login.ts.", "owns": ["src/"]},
+                    {"task": "Use the name", "brief": "Show the name.", "after": ["Fix the login typo"]}]}
+        self.files = getattr(self, "files", 0) + 1
+        path = Path(self.tmp.name) / f"spec-{self.files}.json"
+        path.write_text(json.dumps({**plan, **changes}), encoding="utf-8")
+        return str(path)
+
+    def to_spec(self, **binding):
+        """A bound project whose lead started on plan M31. Returns the lead's call."""
+        self.bind(**binding)
+        result = self.orchestrator("spec", plan="M31", request=self.REQUEST)
+        self.assertTrue(result["ok"], result)
+        (lead,) = self.start()
+        return lead
+
+    def submitted_spec(self, **binding):
+        """The lead submitted its spec, and its run ended. Returns (the lead's call, the user's question)."""
+        lead = self.to_spec(**binding)
+        result = self.worker("submit", *worker_command(lead), "--file", self.spec_file())
+        self.assertTrue(result["ok"], result)
+        self.end(lead)
+        (ask,) = self.orchestrator("next")["ask"]
+        return lead, ask
+
+    def test_a_spec_starts_a_read_only_lead_on_fable_at_high_once_the_binding_is_active(self):
+        self.bind()
+        self.assertTrue(self.orchestrator("control", action="pause")["ok"])
+        refused = self.orchestrator("spec", plan="M31", request=self.REQUEST)
+        self.assertFalse(refused["ok"])
+        self.assertIn("active binding", refused["error"])
+        self.assertTrue(self.orchestrator("control", action="resume", authorization="Go on.")["ok"])
+        self.assertTrue(self.orchestrator("spec", plan="M31", request=self.REQUEST)["ok"])
+        self.assertFalse(self.orchestrator("spec", plan="M31", request=self.REQUEST)["ok"], "one open spec per plan")
+        (lead,) = self.start()
+        arguments = lead["arguments"]
+        self.assertEqual((arguments["role"], arguments["isolation"]), ("review", "shared"), "the reviewer's read-only mode")
+        self.assertEqual(arguments["target"], {"providerInstanceId": "claudeAgent", "model": "claude-fable-5-2",
+                                               "options": {"effort": "high"}})
+        for words in (self.REQUEST, "lead.md", "worker submit --worker", "Edit nothing there", "within 4000 characters"):
+            self.assertIn(words, arguments["task"])
+        self.assertEqual(self.last_done["tell"], ["Lead for plan M31 started on claude-fable-5-2 at high (the default)."])
+        status = self.status()
+        self.assertEqual(status["specs"], [{"plan": "M31", "state": "writing", "lead": lead["worker"], "goal": None}])
+        self.assertEqual((status["models"]["lead"]["model"], status["tasks"]), ("claude-fable-5-2", []))
+
+    def test_the_leads_plan_is_checked_as_queue_set_checks_one_and_nothing_starts_before_you_approve_it(self):
+        lead = self.to_spec()
+        me = worker_command(lead)
+        for changes, words in (({"tasks": [{"task": "A", "brief": "Do A.", "after": ["Nope"]}]}, "No single task is named Nope"),
+                               ({"tasks": [{"task": "A"}]}, "Task A needs a brief"),
+                               ({"owns": [], "tasks": [{"task": "A", "brief": "Do A."}]}, "owns lists the paths"),
+                               ({"questions": ["x" * flow.SPEC_CHARS]}, f"keep it within {flow.SPEC_CHARS}")):
+            refused = self.worker("submit", *me, "--file", self.spec_file(**changes))
+            self.assertFalse(refused["ok"], changes)
+            self.assertIn(words, refused["error"])
+            self.assertIn("Fix the file and run this again", refused["error"])
+        missing = self.worker("submit", *me, "--file", str(Path(self.tmp.name) / "none.json"))
+        self.assertIn("Write the file and run this again", missing["error"])
+        self.assertTrue(self.worker("submit", *me, "--file", self.spec_file())["ok"])
+        self.assertFalse(self.worker("submit", *me, "--file", self.spec_file())["ok"], "submitted once")
+        step = self.orchestrator("next")
+        (ask,) = step["ask"]
+        self.assertEqual(ask["options"], ["approve", "drop"])
+        self.assertEqual(ask["question"], "\n".join([
+            "The lead's spec for plan M31.", "Goal: Let users sign in with a name.", "Tasks:",
+            "1. Fix the login typo (paths: src/; starts at once)", "2. Use the name (paths: src/; waits for Fix the login typo)",
+            "Open questions: none.", "Approve it, drop it, or say what to change."]))
+        self.assertEqual(self.status()["tasks"], [], "nothing is queued before you approve")
+        self.end(lead)
+        step = self.orchestrator("next")
+        self.assertEqual(step["calls"], [], "a lead that submitted owes nothing")
+        self.assertEqual(step["tell"][-1], f"Summary: nothing more can move without you. Waiting for you: {ask['id']} (the "
+                                           f"spec of plan M31: approve, drop or say what to change). So far 0 merged, 0 dropped.")
+
+    def test_an_approved_spec_queues_its_plan_and_its_workers_briefs_carry_the_spec(self):
+        _, ask = self.submitted_spec()
+        answered = self.orchestrator("answer", ask=ask["id"], answer="approve")
+        self.assertEqual((answered["spec"], answered["state"]), ("M31", "approved"))
+        (call,) = self.start()
+        self.assertIn("Plan M31 is queued from its approved spec: 2 tasks.", self.last_step["tell"])
+        self.assertEqual([(t["task"], t["state"]) for t in self.status()["tasks"]],
+                         [("Fix the login typo", "implementing"), ("Use the name", "waiting")])
+        brief = call["arguments"]["task"]
+        self.assertIn("Brief: Rename nmae to name in src/login.ts.\nThe plan's goal: Let users sign in with a name.", brief)
+        self.assertNotIn("Out of scope", brief, "the implementer gets the goal alone")
+        worker, token, tree = self.implement(call, "export const name = 1;\n", 7)
+        self.assertTrue(self.worker("pr", worker, token, "--pr", "7", path=tree)["ok"])
+        (review,) = self.start()
+        self.assertIn("judge the change against it too:\nGoal: Let users sign in with a name.\nIn scope: The login form\n"
+                      "Out of scope: Sign-up\nOpen questions: none", review["arguments"]["task"])
+        self.assertFalse(self.orchestrator("answer", ask=ask["id"], answer="drop")["ok"], "answered once")
+
+    def test_your_words_on_a_spec_go_to_its_lead_which_submits_again_and_drop_ends_it(self):
+        lead, ask = self.submitted_spec()
+        answered = self.orchestrator("answer", ask=ask["id"], answer="Split the first task in two.")
+        self.assertEqual(answered["state"], "writing")
+        (revise,) = self.start()
+        self.assertEqual((revise["tool"], revise["arguments"]["threadId"]), ("t3_thread_send", f"child-{lead['worker']}"))
+        self.assertIn("The user's answer to your spec: Split the first task in two.", revise["arguments"]["message"])
+        self.assertIn("worker submit", revise["arguments"]["message"])
+        self.assertTrue(self.worker("submit", *worker_command(lead), "--file", self.spec_file(goal="Sign in by name."))["ok"])
+        (again,) = self.orchestrator("next")["ask"]
+        self.assertNotEqual(again["id"], ask["id"])
+        self.assertIn("Goal: Sign in by name.", again["question"])
+        self.assertEqual(self.orchestrator("answer", ask=again["id"], answer="drop")["state"], "dropped")
+        self.assertIn("Dropped the spec of plan M31.", self.orchestrator("next")["tell"])
+        self.assertEqual((self.status()["specs"][0]["state"], self.status()["tasks"]), ("dropped", []))
+        self.assertTrue(self.orchestrator("spec", plan="M31", request=self.REQUEST)["ok"], "the name is free again")
+
+    def test_a_lead_that_ends_without_submitting_is_asked_once_then_blocked_until_you_restart_or_drop_it(self):
+        lead = self.to_spec()
+        self.end(lead)
+        (nudge,) = self.start()
+        self.assertIn("worker submit", nudge["arguments"]["message"])
+        self.end(nudge)
+        step = self.orchestrator("next")
+        self.assertEqual(step["calls"], [])
+        self.assertIn("Spec (M31) is blocked: its lead ended twice without reporting. Say restart to give it a new lead, "
+                      "or drop it.", step["tell"])
+        self.assertEqual(step["tell"][-1], "Summary: nothing more can move without you. Waiting for you: the spec of plan "
+                                           "M31 is blocked: its lead ended twice without reporting. So far 0 merged, 0 dropped.")
+        self.assertFalse(self.orchestrator("restart", spec="M31")["ok"], "a restart needs your own words")
+        self.assertTrue(self.orchestrator("restart", spec="M31", authorization="Restart the lead.")["ok"])
+        (fresh,) = self.start()
+        self.assertEqual(fresh["tool"], "delegate_task")
+        self.assertNotEqual(fresh["worker"], lead["worker"])
+        dropped = self.orchestrator("spec", plan="M31", drop=True)
+        self.assertEqual(dropped["state"], "dropped")
+        (cancel,) = self.start()
+        self.assertEqual((cancel["tool"], cancel["worker"]), ("task_cancel", fresh["worker"]))
+
+    def test_a_quiet_lead_is_replaced_once_without_you(self):
+        lead = self.to_spec()
+        self.assertTrue(self.quiet(lead)["send"])
+        cancel, fresh = self.start()
+        self.assertEqual((cancel["tool"], fresh["tool"], fresh["arguments"]["role"]), ("task_cancel", "delegate_task", "review"))
+        self.assertIn(f"{lead['worker']}, the lead of plan M31 was quiet since 2026-11-23T09:00:00Z, so it was stopped and "
+                      f"a new lead took over.", self.last_step["tell"])
+        self.assertTrue(self.quiet(fresh, "2026-11-23T10:00:00Z")["send"])
+        (cancel,) = self.start()
+        self.assertEqual((cancel["tool"], cancel["worker"]), ("task_cancel", fresh["worker"]))
+        self.assertEqual(self.status()["specs"][0]["state"], "blocked")
+
+    FABLE = [{"slug": "claude-fable-5-2", "capabilities": {"optionDescriptors": [
+        {"id": "effort", "options": levels(*CLAUDE_EFFORTS)}]}}]
+
+    def test_a_lead_stopped_at_its_quota_is_replaced_at_once_by_a_stand_in_on_opus(self):
+        self.t3_caches(claude=CLAUDE_LIST + self.FABLE)
+        lead = self.to_spec()
+        self.assertEqual(lead["arguments"]["target"]["model"], "claude-fable-5-2")
+        self.end(lead, "failed", CLAUDE_STOP)
+        (fresh,) = self.start()
+        self.assertEqual((fresh["tool"], fresh["arguments"]["target"]["model"]), ("delegate_task", "claude-opus-5-5"))
+        self.assertIn("lead", self.jev_roles, "Jev is asked for the stand-in")
+        self.assertIn("claude-fable-5-2 is at its usage limit, so a new lead runs on claude-opus-5-5 until it resets.",
+                      self.last_step["tell"])
+        self.assertEqual(self.last_done["tell"], ["Lead for plan M31 started on claude-opus-5-5 at high (a stand-in for "
+                                                  "claude-fable-5-2)."])
+
+    def test_the_lead_has_its_own_model_setting_which_models_status_and_pick_show(self):
+        self.t3_caches(claude=CLAUDE_LIST + self.FABLE)
+        models = self.orchestrator("models")
+        self.assertEqual(models["defaults"]["lead"], {"model": "claude-fable-5-2", "effort": "high", "runs": True})
+        self.bind()
+        picked = self.orchestrator("pick", role="lead", model="claude-opus-5-5", effort="max", authorization="Opus at max.")
+        self.assertTrue(picked["ok"], picked)
+        self.assertEqual(self.status()["models"]["lead"], {"model": "claude-opus-5-5", "modelSource": "pick",
+                                                           "effort": "max", "effortSource": "pick"})
+        self.assertTrue(self.orchestrator("spec", plan="M31", request=self.REQUEST)["ok"])
+        self.start()
+        self.assertEqual(self.last_done["tell"], ["Lead for plan M31 started on claude-opus-5-5 at max (your choice)."])
+
+    def test_a_binding_an_earlier_version_made_gets_the_leads_default(self):
+        self.bind()
+        db = store.connect(self.db)
+        try:
+            with db:
+                config = json.loads(db.execute("SELECT config FROM projects WHERE id=?", (PROJECT,)).fetchone()[0])
+                for key in ("lead", "leadEffort"):
+                    del config["defaults"][key]
+                db.execute("UPDATE projects SET config=? WHERE id=?", (store.packed(config), PROJECT))
+        finally:
+            db.close()
+        self.assertEqual(self.status()["models"]["lead"], {"model": "claude-fable-5-2", "modelSource": "default",
+                                                           "effort": "high", "effortSource": "default"})
 
 
 class QuotaTests(unittest.TestCase):

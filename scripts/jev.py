@@ -23,7 +23,7 @@ KEY_ROOT = places.SHARED  # The key file is relative to the shared data folder a
 DEFAULT_KEY_FILE = "secrets/typesafe-api-key.txt"
 MAX_RESPONSE_BYTES = 256_000
 TIMEOUT_SECONDS = 20
-ROLES = ("implementer", "reviewer", "devops")
+ROLES = ("implementer", "reviewer", "devops", "lead")
 SCORES_FILE = Path(__file__).resolve().parent.parent / "assets" / "scores.json"  # Refreshed by scores.py.
 CARDS_FILE = Path(__file__).resolve().parent.parent / "assets" / "cards.json"  # One ability card per approved model.
 USE_WINDOWS_CURL = os.name == "nt"

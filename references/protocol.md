@@ -13,10 +13,11 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
 | done | `{"op":"done","results":[{"call":"w1-start","taskId":"…","childThreadId":"…"}]}` | `recorded`, `tell` |
 | queue_set | `{"op":"queue_set","plans":[{"plan":"M30","owns":["src/login/"],"dependsOn":[],"tasks":[{"task":"Fix the login typo","brief":"…"},{"task":"Add the login test","brief":"…","after":["Fix the login typo"]}]}]}` | `plans` |
 | queue_edit | `{"op":"queue_edit","plan":"M30","tasks":[{"task":"…","brief":"…"}]}`, `{"op":"queue_edit","plans":[…]}`, `{"op":"queue_edit","drop":"Fix the login typo"}`, `{"op":"queue_edit","task":"Add the login test","after":[],"why":"…"}` | `plans`, `tasks`, `dropped`, `relinked` |
-| answer | `{"op":"answer","ask":"a7","answer":"merge"}` | `task`, `state` |
-| restart | `{"op":"restart","task":"Fix the login typo","authorization":"<the user's words>"}` | `task`, `state` |
+| spec | `{"op":"spec","plan":"M31","request":"<the user's words>"}`, `{"op":"spec","plan":"M31","drop":true}` | `spec`, `state` |
+| answer | `{"op":"answer","ask":"a7","answer":"merge"}` | `task` or `spec`, `state` |
+| restart | `{"op":"restart","task":"Fix the login typo","authorization":"<the user's words>"}` | `task` or `spec`, `state` |
 | control | `{"op":"control","action":"activate","authorization":"<the user's words>"}` | `control` |
-| status | `{"op":"status"}` | plans with `dependsOn`, tasks with `after`, each role's model, guarded paths, working workers, open asks, problems |
+| status | `{"op":"status"}` | plans with `dependsOn`, tasks with `after`, specs, each role's model, guarded paths, working workers, open asks, problems |
 | setup_github | `{"op":"setup_github","authorization":"<the user's words>"}` | `repo`, `changed` |
 | models | `{"op":"models","search":"qwen"}` | `providers`, `defaults` (each with `runs`), `models` (each with `provider`, `efforts`) |
 | pick | `{"op":"pick","role":"reviewer","model":"…","effort":"xhigh","authorization":"<the user's words>"}` | `model`, `effort`, each with its source |
@@ -40,13 +41,16 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
   - **Relinking:** `task` with `after`, or `plan` with `dependsOn`, replaces that list; `[]` waits for
     nothing. A task's links change only while it is `waiting`, a loop is refused, and taking off a link
     to unfinished work needs `why`.
+- **spec** starts a lead for a new plan, on an active binding; `drop` ends an open spec. A spec's text
+  holds at most 4000 characters.
 - **answer** answers an `ask`:
+  - A spec takes `approve` (its plan joins the queue), `drop`, or the user's words, sent to its lead.
   - A PR outside its task's paths or under a guarded path takes `merge`, `back` (to its implementer)
     or `drop`.
   - After 3 review rounds: `carry on`, `restart` (a new implementer, on another model unless the
     implementer's model is picked) or `drop`.
   - A stuck implementer's question takes the user's own words, sent to it.
-- **restart** gives a task a new worker in the role of the one that holds it.
+- **restart** gives a task a new worker in the role of the one that holds it; with `spec` (a plan), a new lead.
 - **control**: `activate`, `pause`, `resume` or `stop`. All but `pause` need the user's own words.
   Workers start only while the binding is active. Running workers finish their current step.
 - **setup_github** applies the repo settings and protection in [setup](setup.md#4-protect-the-branch),
@@ -115,6 +119,7 @@ quiet before that work reports, the task is `blocked`.
 | DevOps | `worker merge` | Squash-merges the approved head once its required checks and `t3/review` are green, then fast-forwards the project folder when it is on the branch. |
 | DevOps | `worker failed --cause task\|pipeline --detail "…"` | `task` sends the failure to the implementer. `pipeline` holds the task until DevOps's own fix merges. |
 | DevOps | `worker pipeline --pr N` | Registers DevOps's pipeline-fix PR as a task, which a reviewer then reads |
+| Lead | `worker submit --file F` | Checks the spec and plan in JSON file F as `queue_set` checks a plan, then asks the user |
 
 A refused command changes nothing. Its error says what to do.
 

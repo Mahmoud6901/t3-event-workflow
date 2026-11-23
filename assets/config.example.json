@@ -25,7 +25,9 @@
     "reviewer": "gpt-6.2-astra",
     "reviewerEffort": "xhigh",
     "devops": "claude-sonnet-5-5",
-    "devopsEffort": "high"
+    "devopsEffort": "high",
+    "lead": "claude-fable-5-2",
+    "leadEffort": "high"
   },
   "jev": {
     "model": "jev-1.13.0",

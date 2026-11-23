@@ -19,8 +19,11 @@ OPERATIONS = [SCRIPTS / name for name in ("harness.py", "flow.py")]
 
 # Characters a role reads to start: the orchestrator its docs and the context its hook adds each turn, a worker the doc its
 # brief names. Raise one only on purpose, and cut something first if you can: a session pays for these on every turn.
-ROLE_DOCS = {**t3_hooks.ROLE_DOCS, "implementer": ("implementer.md",), "reviewer": ("reviewer.md",), "devops": ("devops.md",)}
-BUDGET = {"orchestrator": 14930, "implementer": 2700, "reviewer": 2080, "devops": 3150}  # About 5% over 2026-11-10; raised 2026-11-23.
+ROLE_DOCS = {**t3_hooks.ROLE_DOCS, "implementer": ("implementer.md",), "reviewer": ("reviewer.md",), "devops": ("devops.md",),
+             "lead": ("lead.md",)}
+# About 5% over 2026-11-10; raised 2026-11-23. The orchestrator's rose by 490 for the lead (spec, submit), after its
+# planning text moved to lead.md.
+BUDGET = {"orchestrator": 15420, "implementer": 2700, "reviewer": 2080, "devops": 3150, "lead": 2000}
 with patch.object(t3_hooks, "REFERENCES", Path("references")):  # Where the copy is installed is not the docs' length.
     FIXED_CONTEXT = {"orchestrator": t3_hooks.orchestrator_context("codex")}  # The longer of the two runtimes' contexts.
 

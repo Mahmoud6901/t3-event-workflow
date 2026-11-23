@@ -56,8 +56,9 @@ def orchestrator_context(runtime):
     return ("T3 workflow orchestrator: you plan with the user and report to them; workers do the work in the background. "
             f"Follow {REFERENCES / 'orchestrator.md'}.{reads} On every wake run the shell command {NEXT}, make each call it "
             "returns in order, record what T3 returned with t3-workflow '{\"op\":\"done\",\"results\":[...]}', give the "
-            "user its tell lines and put its asks to them, then end your turn. On the user's message, plan with queue_set "
-            "or queue_edit. You edit nothing and run no other command.")
+            "user its tell lines and put its asks to them, then end your turn. On the user's message, queue one clear "
+            "task with queue_set or queue_edit, and give other work to the lead with spec. You edit nothing and run no "
+            "other command.")
 
 
 def bindings():
