@@ -2326,6 +2326,9 @@ def reviewer_brief(config, task, worker):
         f"Check each decision in the PR body's Decisions section (gh pr view {task['pr']} --repo "
         f"{config['github']['repo']}) against the brief. One that changes what the task asks for, or that the user "
         f"should have made, is a blocking finding.",
+        f"Where the project can be run (its README or instructions say how), run it in {tree} and try what the task "
+        f"changed, as a user would. Something that fails when tried is a blocking finding. In your comment, say what "
+        f"you tried and what happened, or why you could not run it. Leave no files behind.",
         "Local checks at that commit:", *[f"- {line}" for line in evidence_lines(task)],
         f"Post your findings as one comment: gh pr comment {task['pr']} --repo {config['github']['repo']} --body \"...\"",
         f"Then run {command('worker', 'review', me, '--verdict', 'approve', '--sha', head)} "

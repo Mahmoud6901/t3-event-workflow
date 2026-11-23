@@ -852,6 +852,9 @@ class FlowTests(unittest.TestCase):
         self.assertIn(head, arguments["task"])
         self.assertIn(str(tree.resolve()).replace("\\", "/"), arguments["task"])
         self.assertIn("lint: passed", arguments["task"])
+        self.assertIn(f"run it in {str(tree.resolve()).replace(chr(92), '/')} and try what the task changed, as a user "
+                      f"would. Something that fails when tried is a blocking finding.", arguments["task"])
+        self.assertIn("say what you tried and what happened, or why you could not run it", arguments["task"])
 
     def test_a_project_whose_t3_id_a_folder_name_cannot_hold_still_runs_its_checks(self):
         # T3 gave a project an id of the form mcp:<uuid> (2026-11-23), and worker pr crashed making its log folder.

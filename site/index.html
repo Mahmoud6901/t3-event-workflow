@@ -97,7 +97,7 @@
   <div class="roles-cols">
     <p data-reveal style="--i:2"><b>The orchestrator</b> plans the work with you and reports back. It edits nothing: its hook lets it run only <code>t3-workflow</code>, so every change reaches your code through a worker and a pull request. It runs on any Claude or Codex model you pick in T3.</p>
     <p data-reveal style="--i:3"><b>An implementer</b> takes one task in its own T3 checkout, changes only that task’s paths, runs the project’s checks and opens one pull request. Review notes, conflicts and CI failures come back to the same implementer. By default, <span class="nw">GPT-6.1-Sol</span> at xhigh.</p>
-    <p data-reveal style="--i:4"><b>A reviewer</b> reads the pull request at one commit and changes nothing. It approves that exact commit with the <code>t3/review</code> status, or lists each blocking finding with its file and line. By default, <span class="nw">GPT-6.2 Astra</span> at xhigh.</p>
+    <p data-reveal style="--i:4"><b>A reviewer</b> reads the pull request at one commit, tries it where the project can be run, and changes nothing. It approves that exact commit with the <code>t3/review</code> status, or lists each blocking finding with its file and line. By default, <span class="nw">GPT-6.2 Astra</span> at xhigh.</p>
     <p data-reveal style="--i:5"><b>DevOps</b> brings each confirmed pull request up to date, waits for CI and squash-merges it through GitHub. It owns the pipeline too, and fixes it in PRs of its own. Turn it off and the workflow merges with no model. By default, <span class="nw">Sonnet 5.5</span> at high.</p>
   </div>
 </section>

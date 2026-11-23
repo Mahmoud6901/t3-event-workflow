@@ -12,7 +12,7 @@ back. Everything else runs in the background, as T3 delegated tasks the orchestr
 |---|---|---|
 | Orchestrator | Plans with the user, makes the harness's calls, reports | Any Claude or Codex model, picked by the user in T3 |
 | Implementer | One task in its own T3 checkout, ending in one PR | The user's choice, else Jev's per task, else the best-scored approved model T3 runs; `xhigh` |
-| Reviewer | Reads the PR at one commit and approves it or asks for changes | The user's choice, else GPT-6.2 Astra, `xhigh` |
+| Reviewer | Reads the PR at one commit, tries the change, and approves it or asks for changes | The user's choice, else GPT-6.2 Astra, `xhigh` |
 | DevOps | One per plan: updates and squash-merges confirmed PRs, triages CI, owns the pipeline. The user can turn it off; then the harness merges | The user's choice, else Sonnet 5.5, `high` |
 
 While a model is at its usage limit (T3 shows it spent, or a worker's run stopped at its quota), Jev starts
