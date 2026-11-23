@@ -21,6 +21,7 @@
     }
   ],
   "defaults": {
+    "implementer": "claude-opus-5-5",
     "implementerEffort": "xhigh",
     "reviewer": "gpt-6.2-astra",
     "reviewerEffort": "xhigh",

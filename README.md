@@ -25,12 +25,11 @@ Only a model with an ability card in `assets/cards.json` is approved. The card s
 good and weak at in coding-agent work, from independent boards where they exist and from its maker
 otherwise, with the date its sources were read. Every approved model but Fable 5.2 can implement;
 Astra, Opus, Sonnet, Neon and Gemini 4 Carbon can review; Sonnet, Opus and Neon can run DevOps; Fable
-5.2 and Opus can lead; Neon, Sonnet and Opus can write the docs. The default models are GPT-6.2 Astra
-for reviewers at `xhigh` effort, Sonnet 5.5 for DevOps at `high`, Fable 5.2 for the lead at `high`, and
-Gemini 4 Neon for the docs worker at `high`.
-Implementers have no default model: Jev chooses one for each task. You can choose each role's model,
-its effort, or both, at setup or later: any model your T3 runs, at any effort T3 offers for it. Setup
-checks which models your T3 can run, and asks you to pick one for any role it cannot start.
+5.2 and Opus can lead; Neon, Sonnet and Opus can write the docs. The default models are Opus 5.5 for
+implementers at `xhigh` effort, GPT-6.2 Astra for reviewers at `xhigh`, Sonnet 5.5 for DevOps at `high`,
+Fable 5.2 for the lead at `high`, and Gemini 4 Neon for the docs worker at `high`. You can choose each
+role's model, its effort, or both, at setup or later: any model your T3 runs, at any effort T3 offers
+for it. Setup checks which models your T3 can run, and asks you to pick one for any role it cannot start.
 
 A model can have more than one route. Opus 5.5 runs through Claude, then Antigravity, then goose on
 OpenRouter; Sonnet 5.5 through Claude, then Antigravity; Astra through Codex, then goose; Neon through
@@ -40,16 +39,13 @@ not the first. Goose routes, and the models that run only on goose, are paid per
 only while no subscription route of an approved model for the role has capacity, and the start line
 then says so. A model you pick runs as you picked it.
 
-With a Jev key, Jev chooses the model of each task's implementer where you left it open. For each
-option it reads the card, the model's record in your projects, its [LiveBench 2.0](https://livebench.ai/)
-scores and whether it is a subscription or paid. It sizes the change from the task, fits the
-strengths and weaknesses to it, and lets the record outweigh scores and claims once it holds several
-tasks of that size. Without Jev's answer (no key, Jev unreachable, an invalid reply, or a model it was
-not offered), the implementer runs on Opus 5.5 when one of its routes has capacity, else on the
-best-scored model that can start; its start line says which. Jev never sets an effort: an implementer
-runs at `xhigh` unless you choose another. The other roles run on your choice or the default.
-While that model has no route with capacity, Jev picks a stand-in among those with capacity, and new
-workers go back to your model when the limit resets.
+Each role runs on your choice or the default. While that model has no route with capacity, Jev picks a
+stand-in among the role's models with capacity. For each option it reads the card, the model's record
+in your projects, its [LiveBench 2.0](https://livebench.ai/) scores and whether it is a subscription or
+paid. It sizes the change from the task, fits the strengths and weaknesses to it, and lets the record
+outweigh scores and claims once it holds several tasks of that size. Without Jev's answer (no key, Jev
+unreachable, an invalid reply, or a model it was not offered), the best-scored option stands in. New
+workers go back to your model or the default when the limit resets. Jev never sets an effort.
 
 A reviewer is never of the same family as the model that wrote its PR. The family is the model's maker,
 whichever provider runs it: Anthropic for Claude, OpenAI for GPT, Google for Gemini. When the reviewer's
@@ -78,9 +74,8 @@ new version (see [Each project apart](#each-project-apart)).
 Then:
 
 1. **Jev key (optional):** put the raw TypeSafe key on one line in
-   `~/.t3-workflow/secrets/typesafe-api-key.txt`, or set `TYPESAFE_API_KEY`. Without it, an implementer
-   whose model you left open runs on Opus 5.5, or on the best-scored model that can start; the rest use
-   the chosen or default models.
+   `~/.t3-workflow/secrets/typesafe-api-key.txt`, or set `TYPESAFE_API_KEY`. Without it, every role runs on
+   the chosen or default model, and the best-scored model with capacity stands in for one at its limit.
 2. **GitHub's `workflow` scope (optional):** run `gh auth refresh -s workflow` if git on this computer
    signs in through `gh` (`gh auth setup-git`). Without that scope, GitHub refuses pushes that change
    files in `.github/workflows/`, such as DevOps's pipeline fixes. With Git Credential Manager, pushes

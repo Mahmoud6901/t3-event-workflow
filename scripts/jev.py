@@ -1,9 +1,10 @@
-"""Jev's advice for one new worker of the delegated PR workflow: its model. Jev sets no effort.
+"""Jev's advice for one new worker of the delegated PR workflow: its model, as a stand-in while the role's own model has
+no route with capacity, or as another model for a task restarted after its review rounds. Jev sets no effort.
 
 The harness owns the workflow and its defaults. This module only builds one request, validates one response and keeps
-the valid choices; anything missing or invalid is left to the harness (flow.default_jev): an implementer's model to the
-fallback or the best scored (ranked) of its options, the rest to the defaults. Jev reads each option's ability card
-(assets/cards.json), its record in the owner's projects, its board scores (assets/scores.json) and its route.
+the valid choices; anything missing or invalid is left to the harness (flow.default_jev), which then takes the best
+scored (ranked) of the options. Jev reads each option's ability card (assets/cards.json), its record in the owner's
+projects, its board scores (assets/scores.json) and its route.
 """
 
 from __future__ import annotations

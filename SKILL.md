@@ -12,7 +12,7 @@ back. Everything else runs in the background, as T3 delegated tasks the orchestr
 |---|---|---|
 | Orchestrator | Plans with the user, makes the harness's calls, reports | Any Claude or Codex model, picked by the user in T3 |
 | Lead | Reads the project, writes a spec and splits it into tasks; the user approves it before any task starts. It edits nothing | The user's choice, else Fable 5.2, `high` |
-| Implementer | One task in its own T3 checkout, ending in one PR | The user's choice, else Jev's per task, else Opus 5.5, else the best-scored model that can start; `xhigh` |
+| Implementer | One task in its own T3 checkout, ending in one PR | The user's choice, else Opus 5.5, `xhigh` |
 | Reviewer | Reads the PR at one commit, tries the change, and approves it or asks for changes | The user's choice, else GPT-6.2 Astra, `xhigh` |
 | DevOps | One per plan: updates and squash-merges confirmed PRs, triages CI, owns the pipeline. The user can turn it off; then the harness merges | The user's choice, else Sonnet 5.5, `high` |
 | Docs worker | One per finished plan with merged work: updates the README, an existing changelog and the binding's docs paths in one PR, or ends with no PR when nothing needs it. The user can turn it off | The user's choice, else Gemini 4 Neon, `high` |
@@ -25,8 +25,8 @@ Only a model with an ability card (`assets/cards.json`) is approved. A model may
 effort it offers. Paid goose routes are offered only while no subscription route has capacity.
 While a model has no route with capacity (T3 shows it spent, or a run stopped at its quota), Jev starts
 that role's new workers on an approved model with capacity, over the user's choice too, until the limit
-resets. A worker stopped at its quota is replaced at once; with no model left with capacity, its task
-waits for the reset and then starts by itself.
+resets. Without Jev's answer, the best-scored one does. A worker stopped at its quota is replaced at
+once; with no model left with capacity, its task waits for the reset and then starts by itself.
 
 A task merges only when all of these hold:
 - the reviewer approved the PR's exact head commit (the `t3/review` status)

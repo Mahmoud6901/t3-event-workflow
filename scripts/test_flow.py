@@ -225,7 +225,7 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assertTrue(self.orchestrator("control", action="activate", authorization="Activate the workflow.")["ok"])
 
-    def test_a_queued_task_starts_its_implementer_in_its_own_worktree_on_jevs_model_at_xhigh(self):
+    def test_a_queued_task_starts_its_implementer_in_its_own_worktree_on_the_default_opus_at_xhigh(self):
         self.bind()
         queued = self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [
             {"task": "Fix the login typo", "brief": "Rename nmae to name in src/login.ts."}]}])
@@ -236,9 +236,9 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(call["tool"], "delegate_task")
         arguments = call["arguments"]
         self.assertEqual((arguments["isolation"], arguments["role"], arguments["mode"]), ("worktree", "implementation", "async"))
-        self.assertEqual(arguments["target"], {"providerInstanceId": "codex", "model": "gpt-6.2-astra",
-                                               "options": {"reasoningEffort": "xhigh", "serviceTier": "default"}},
-                         "an effort in Jev's answer, as a task stored before 0.8.1 keeps, is not used")
+        self.assertEqual(arguments["target"], {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5",
+                                               "options": {"effort": "xhigh"}})
+        self.assertEqual(getattr(self, "jev_asked", 0), 0, "Jev chooses no implementer while Opus can start")
         self.assertEqual(arguments["clientRequestId"], call["call"])
         self.assertIn("Rename nmae to name in src/login.ts.", arguments["task"])
         self.assertIn("worker pr --worker", arguments["task"])
@@ -283,11 +283,10 @@ class FlowTests(unittest.TestCase):
         self.t3_caches(auth={"status": "unauthenticated"})
         self.assertIn("not signed in", self.orchestrator("models")["providers"]["goose"])
 
-    def test_without_codex_setup_needs_a_pick_for_the_reviewer_and_the_implementer_falls_back_to_opus(self):
+    def test_without_codex_setup_needs_a_pick_for_the_reviewer_and_the_implementer_runs_on_opus(self):
         self.t3_caches(codex=None)
         found = self.orchestrator("models")
-        self.assertEqual(found["defaults"]["implementer"],
-                         {"model": None, "fallback": "claude-opus-5-5", "effort": "xhigh", "runs": True})
+        self.assertEqual(found["defaults"]["implementer"], {"model": "claude-opus-5-5", "effort": "xhigh", "runs": True})
         self.assertEqual(found["defaults"]["reviewer"], {"model": "gpt-6.2-astra", "effort": "xhigh", "runs": False})
         refused = self.orchestrator("init", workspace=str(self.workspace), repo=REPO, requiredChecks=["acceptance"], checks=[],
                                     noChecksReason="Test project")
@@ -299,25 +298,57 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5",
                                                        "options": {"effort": "xhigh"}})
 
-    def test_jev_chooses_the_implementer_and_without_its_answer_or_opus_the_best_scored_model_t3_runs_starts(self):
+    def test_the_implementer_runs_on_opus_and_on_jevs_stand_in_while_opus_has_no_route_with_capacity(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
         self.assertEqual(self.orchestrator("models")["defaults"]["implementer"],
-                         {"model": None, "fallback": "claude-opus-5-5", "effort": "xhigh", "runs": True})
+                         {"model": "claude-opus-5-5", "effort": "xhigh", "runs": True})
         self.bind()
         self.assertEqual(self.status()["models"]["implementer"],
-                         {"model": None, "modelSource": "jev", "effort": "xhigh", "effortSource": "default"})
-        self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage={"claudeAgent": SPENT})
-        self.jev_answer = {}  # No answer: no Jev key, Jev unreachable, or an invalid reply.
+                         {"model": "claude-opus-5-5", "modelSource": "default", "effort": "xhigh", "effortSource": "default"})
         self.queue("Fix the login typo")
         (call,) = self.start()
-        self.assertEqual(call["arguments"]["target"]["model"], "claude-opus-5-5", "through Antigravity, its next route")
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5",
+                                                       "options": {"effort": "xhigh"}})
+        self.assertEqual(self.last_done["tell"], ["Implementer for Fix the login typo (M30) started on claude-opus-5-5 at "
+                                                  "xhigh (the default)."])
+        self.assertEqual(getattr(self, "jev_asked", 0), 0)
         self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage={"claudeAgent": SPENT, "antigravity": SPENT})
+        self.jev_answer = {"implementer": "gpt-6.2-sol"}
         self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
         (call,) = self.start()
-        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra", "the best scored, while Opus is at its limits")
+        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-sol", "Jev's stand-in")
+        self.assertEqual(self.jev_roles, ["implementer"])
+        self.assertEqual(set(self.jev_models), {"gpt-6.2-sol", "gpt-6.2-astra"}, "the other options with capacity")
+        self.assertIn("claude-opus-5-5 is at its usage limit, so a new implementer runs on gpt-6.2-sol until it resets.",
+                      self.last_step["tell"])
+        self.assertEqual(self.last_done["tell"], ["Implementer for Add a footer (M30) started on gpt-6.2-sol at xhigh "
+                                                  "(a stand-in for claude-opus-5-5)."])
+        self.assertEqual(self.status()["models"]["implementer"]["model"], "claude-opus-5-5", "the role's own model stays")
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)  # The limits reset.
+        self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a header", "brief": "Add it."}])["ok"])
+        (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"]["model"], "claude-opus-5-5", "new workers go back to the default")
+
+    def test_an_older_binding_gains_the_implementers_default_and_a_users_pick_stays(self):
+        self.t3_caches()
+        self.bind()
+        defaults = {k: v for k, v in flow.DEFAULTS.items() if k != "implementer"}
+        self.stored_config(defaults=defaults)  # As 0.8.0 to 0.10.0 stored it: no implementer model.
+        self.assertEqual(self.status()["models"]["implementer"],
+                         {"model": "claude-opus-5-5", "modelSource": "default", "effort": "xhigh", "effortSource": "default"})
+        self.stored_config(defaults={**defaults, "implementer": "gpt-6.2-sol"})  # As a version before 0.8.0 stored it.
+        self.assertEqual(self.status()["models"]["implementer"]["model"], "claude-opus-5-5")
+        self.assertTrue(self.orchestrator("pick", role="implementer", model="gpt-6.2-astra",
+                                          authorization="Use Astra for the implementer.")["ok"])
+        self.stored_config(defaults=defaults)
+        self.assertEqual(self.status()["models"]["implementer"],
+                         {"model": "gpt-6.2-astra", "modelSource": "pick", "effort": "xhigh", "effortSource": "default"})
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra")
 
     def test_jev_advises_only_among_the_models_t3_can_run(self):
-        self.t3_caches(goose=None)
+        self.t3_caches(goose=None, usage={"claudeAgent": SPENT})  # Opus has no route with capacity.
         self.bind()
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         self.orchestrator("next")
@@ -325,12 +356,12 @@ class FlowTests(unittest.TestCase):
         self.assertFalse([m for m in self.jev_models if "/" in m], self.jev_models)
 
     def test_a_model_approved_after_a_project_was_bound_reaches_jev_once_t3_lists_it(self):
-        self.t3_caches()  # T3 has no Antigravity list yet, so Jev leaves Gemini 4 Neon out.
+        self.t3_caches(usage={"claudeAgent": SPENT})  # T3 has no Antigravity list yet, so Jev leaves Gemini 4 Neon out.
         self.bind()
         self.queue("Fix the login typo")
         self.start()
         self.assertNotIn("gemini-4-neon", self.jev_models)
-        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST[:1], usage={"claudeAgent": SPENT})
         self.jev_answer = {"implementer": "gemini-4-neon"}
         self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
         (call,) = self.start()
@@ -345,14 +376,13 @@ class FlowTests(unittest.TestCase):
                                                      for tier, m in enumerate(retired, 1)}})
         self.stored_defaults(implementer="gpt-6.2-sol", devops="claude-haiku-5-5")  # As a binding before 0.8.0 keeps them.
         models = self.status()["models"]
-        self.assertEqual(models["implementer"]["modelSource"], "jev", "the implementer has no default model now")
+        self.assertEqual(models["implementer"]["model"], "claude-opus-5-5", "the implementer's default is this version's")
         self.assertEqual(models["devops"]["model"], "claude-sonnet-5-5", "a retired default moves to the current one")
-        self.jev_answer = {}  # No answer, so the fallback starts, not the old default.
         self.queue("Fix the login typo")
         (call,) = self.start()
         self.assertEqual(call["arguments"]["target"]["model"], "claude-opus-5-5")
-        self.assertIn("gpt-6.2-astra", self.jev_models)
-        self.assertFalse(set(retired) & set(self.jev_models), self.jev_models)
+        self.assertIn("gpt-6.2-astra", self.loaded_models())
+        self.assertFalse(set(retired) & set(self.loaded_models()))
 
     def stored_config(self, **changes):
         """The binding's config as an older version stored it."""
@@ -400,56 +430,46 @@ class FlowTests(unittest.TestCase):
 
     def test_a_model_whose_first_route_is_at_its_limit_starts_on_its_next_at_the_effort_that_route_takes(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage={"claudeAgent": SPENT})
-        self.jev_answer = {"implementer": "claude-opus-5-5"}
         self.bind()
         self.queue("Fix the login typo")
         (call,) = self.start()
-        self.assertIn("claude-opus-5-5", self.jev_models, "its Antigravity route has capacity")
-        self.assertNotIn("claude-sonnet-5-5", self.jev_models, "this T3 runs Sonnet only through Claude")
+        self.assertEqual(getattr(self, "jev_asked", 0), 0, "its Antigravity route has capacity, so no stand-in")
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "claude-opus-5-5",
                                                        "options": {"thought_level": "high"}}, "Antigravity offers no xhigh")
         self.assertEqual(self.last_done["tell"], ["Implementer for Fix the login typo (M30) started on claude-opus-5-5 "
-                                                  "through Antigravity at high (Jev's choice)."])
+                                                  "through Antigravity at high (the default)."])
 
     def test_a_quota_one_route_stopped_at_leaves_the_models_other_routes(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        self.jev_answer = {"implementer": "claude-opus-5-5"}
         self.bind()
         self.queue("Fix the login typo")
         (call,) = self.start()
         self.assertEqual(call["arguments"]["target"]["providerInstanceId"], "claudeAgent")
         self.end(call, "failed", CLAUDE_STOP)
         (fresh,) = self.start()
-        self.assertIn("claude-opus-5-5", self.jev_models)
+        self.assertEqual(getattr(self, "jev_asked", 0), 0)
         self.assertEqual((fresh["arguments"]["target"]["providerInstanceId"], fresh["arguments"]["target"]["model"]),
                          ("antigravity", "claude-opus-5-5"))
 
     def test_paid_routes_are_offered_only_while_no_subscription_route_has_capacity(self):
-        self.t3_caches(goose=GOOSE_LIST + PAID_LIST, antigravity=ANTIGRAVITY_LIST, usage={"codex": SPENT})
+        # Opus runs here through Claude alone, which is spent; its goose route is paid.
+        self.t3_caches(goose=GOOSE_LIST + PAID_LIST, antigravity=ANTIGRAVITY_LIST[:1], usage={"claudeAgent": SPENT})
         self.bind()
         self.jev_answer = {"implementer": "gemini-4-neon"}
         self.queue("Fix the login typo")
-        self.start()
-        self.assertEqual(set(self.jev_models), {"claude-opus-5-5", "claude-sonnet-5-5", "gemini-4-neon"},
-                         "no paid route while a subscription has capacity")
+        (call,) = self.start()
+        self.assertEqual(set(self.jev_models), {"gpt-6.2-sol", "gpt-6.2-astra", "gemini-4-neon"},
+                         "no paid route while a subscription has capacity, so a stand-in runs instead of Opus")
+        self.assertEqual(call["arguments"]["target"]["model"], "gemini-4-neon")
         everything = {"codex": SPENT, "claudeAgent": SPENT, "antigravity": SPENT}
         self.t3_caches(goose=GOOSE_LIST + PAID_LIST, antigravity=ANTIGRAVITY_LIST, usage=everything)
-        self.jev_answer = {"implementer": "qwen/qwen4-max"}
         self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
         (call,) = self.start()
-        self.assertEqual(set(self.jev_models), {"claude-opus-5-5", "gpt-6.2-astra", "gemini-4-neon", "google/gemini-4-carbon",
-                                                "qwen/qwen4-max"})
-        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose", "model": "qwen/qwen4-max",
-                                                       "options": {"provider": "openrouter", "thinking_effort": "high"}})
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose", "model": "anthropic/claude-opus-5.5",
+                                                       "options": {"provider": "openrouter", "thinking_effort": "high"}},
+                         "with every subscription spent, the default's paid route comes before a stand-in")
         self.assertEqual(self.last_done["tell"], [
-            "Implementer for Add a footer (M30) started on qwen/qwen4-max at high (Jev's choice; paid through OpenRouter, "
-            "as the subscription models are at their limits)."])
-        self.jev_answer = {"implementer": "claude-opus-5-5"}
-        self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a header", "brief": "Add it."}])["ok"])
-        (call,) = self.start()
-        self.assertEqual(call["arguments"]["target"]["model"], "anthropic/claude-opus-5.5")
-        self.assertEqual(self.last_done["tell"], [
-            "Implementer for Add a header (M30) started on claude-opus-5-5 through goose at high (Jev's choice; paid "
+            "Implementer for Add a footer (M30) started on claude-opus-5-5 through goose at high (the default; paid "
             "through OpenRouter, as the subscription models are at their limits)."])
 
     def test_the_default_reviewers_paid_route_comes_before_a_stand_in_only_once_every_subscription_is_spent(self):
@@ -477,25 +497,31 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.last_done["tell"], ["Implementer for Fix the login typo (M30) started on qwen/qwen4-max at "
                                                   "xhigh (your choice)."])
 
-    def test_without_jevs_answer_the_implementer_runs_on_opus_and_else_on_the_best_scored_option(self):
-        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        self.jev_answer = {}
+    def test_without_jevs_answer_the_best_scored_option_stands_in_for_opus(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage={"claudeAgent": SPENT, "antigravity": SPENT})
+        self.jev_answer = {"implementer": "made-up/model"}  # An option Jev was not offered counts as no answer.
         self.bind()
         self.queue("Fix the login typo")
         (call,) = self.start()
-        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5",
-                                                       "options": {"effort": "xhigh"}})
-        self.assertEqual(self.last_done["tell"], ["Implementer for Fix the login typo (M30) started on claude-opus-5-5 at "
-                                                  "xhigh (the fallback, as Jev gave no answer)."])
-        self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage={"claudeAgent": SPENT, "antigravity": SPENT})
-        self.jev_answer = {"implementer": "made-up/model"}  # An option Jev was not offered counts as no answer.
-        self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
-        (call,) = self.start()
         self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra", "the best scored of the options")
-        self.assertEqual(self.last_done["tell"], ["Implementer for Add a footer (M30) started on gpt-6.2-astra at xhigh "
-                                                  "(the best-scored model that could start, as Jev gave no answer)."])
+        self.assertIn("claude-opus-5-5 is at its usage limit, so a new implementer runs on gpt-6.2-astra until it resets.",
+                      self.last_step["tell"])
+        self.assertEqual(self.last_done["tell"], ["Implementer for Fix the login typo (M30) started on gpt-6.2-astra at xhigh "
+                                                  "(a stand-in for claude-opus-5-5)."])
+
+    def test_a_stand_in_for_a_model_t3_does_not_run_is_not_called_a_usage_limit(self):
+        self.t3_caches(claude=[m for m in CLAUDE_LIST if m["slug"] != "claude-opus-5-5"], goose=None)  # No route of Opus.
+        self.jev_answer = {}
+        self.bind(picks={"lead": "claude-sonnet-5-5"})  # Neither lead runs here.
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra")
+        self.assertFalse([line for line in self.last_step["tell"] if "usage limit" in line], self.last_step["tell"])
 
     def test_a_merged_task_adds_its_counts_to_the_record_jev_reads_next(self):
+        # Opus has no route with capacity, so Jev's stand-ins implement and read the record.
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST[:1], usage={"claudeAgent": SPENT})
+        self.jev_answer["implementer"] = "gemini-4-neon"
         call, devops, _ = self.to_devops()
         job = self.worker("take", *devops)
         self.worker("update", *devops)
@@ -503,13 +529,13 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(self.worker("merge", *devops)["ok"])
         kept = self.db.parent / "record.sqlite3"
         self.assertEqual(record.lines(kept, "implementer"),
-                         {"gpt-6.2-astra": "small: 1 task, 1 approved first time, 0.0 review rounds on average"})
-        self.assertEqual(record.lines(kept, "reviewer"), {"gemini-4-neon": "small: 1 task, 0.0 change requests on average"})
+                         {"gemini-4-neon": "small: 1 task, 1 approved first time, 0.0 review rounds on average"})
+        self.assertEqual(record.lines(kept, "reviewer"), {"gpt-6.2-astra": "small: 1 task, 0.0 change requests on average"})
         self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
         self.start()
-        self.assertEqual(self.jev_records["gpt-6.2-astra"],
+        self.assertEqual(self.jev_records["gemini-4-neon"],
                          "small: 1 task, 1 approved first time, 0.0 review rounds on average")
-        self.assertIsNone(self.jev_records["claude-opus-5-5"], "no record yet")
+        self.assertIsNone(self.jev_records["gpt-6.2-astra"], "no record yet as an implementer")
 
     def test_a_dropped_task_counts_under_its_prs_last_size_and_a_quiet_worker_counts_too(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
@@ -520,7 +546,7 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(self.worker("pr", worker, token, "--pr", "7", path=tree)["ok"])
         self.assertTrue(self.orchestrator("queue_edit", drop="Fix the login typo")["ok"])
         self.assertEqual(record.lines(self.db.parent / "record.sqlite3", "implementer"),
-                         {"gpt-6.2-astra": "large: 1 task, 0 approved first time, 0.0 review rounds on average, 1 dropped"})
+                         {"claude-opus-5-5": "large: 1 task, 0 approved first time, 0.0 review rounds on average, 1 dropped"})
 
     def test_a_record_that_cannot_be_written_fails_nothing_and_health_reports_it(self):
         with patch.object(record, "add", side_effect=OSError("disk full")):
@@ -563,13 +589,13 @@ class FlowTests(unittest.TestCase):
 
     def test_a_reviewer_of_the_implementers_family_runs_on_the_best_scored_reviewer_of_another_family(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        call, review, _ = self.to_review(picks={"reviewer": {"model": "gpt-6.2-sol", "effort": "ultra"}})
-        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra")
+        call, review, _ = self.to_review(picks={"reviewer": {"model": "claude-sonnet-5-5", "effort": "ultrathink"}})
+        self.assertEqual(call["arguments"]["target"]["model"], "claude-opus-5-5")
         self.assertEqual(review["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
                                                          "options": {"thought_level": "xhigh"}},
                          "the user's pick gives way, and so does the effort only that model has")
         self.assertEqual(self.last_done["tell"], ["Reviewer for Fix the login typo (M30) started on gemini-4-neon at xhigh "
-                                                  "(a different family than the implementer's gpt-6.2-astra)."])
+                                                  "(a different family than the implementer's claude-opus-5-5)."])
 
     def test_with_no_reviewer_of_another_family_that_can_run_the_reviewer_runs_as_it_would_have(self):
         self.t3_caches(usage={"claudeAgent": SPENT})  # No Antigravity, and every Claude model is at its limit.
@@ -586,7 +612,8 @@ class FlowTests(unittest.TestCase):
 
     def test_gemini_4_neon_runs_through_antigravity_in_its_effort_terms_and_no_longer_through_goose(self):
         goose_neon = {"slug": "google/gemini-4-neon", "capabilities": {"optionDescriptors": [{"id": "provider"}]}}
-        self.t3_caches(goose=GOOSE_LIST + [goose_neon], antigravity=ANTIGRAVITY_LIST)
+        # Opus has no route with capacity, so Jev picks a stand-in.
+        self.t3_caches(goose=GOOSE_LIST + [goose_neon], antigravity=ANTIGRAVITY_LIST[:1], usage={"claudeAgent": SPENT})
         self.jev_answer = {"implementer": "gemini-4-neon"}
         self.bind(picks={"implementer": {"effort": "max"}})
         self.queue("Fix the login typo")
@@ -619,20 +646,21 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(self.orchestrator("next")["calls"])
         self.assertEqual(getattr(self, "jev_asked", 0), 0)
 
-    def test_jev_is_asked_about_the_implementer_alone_so_the_reviewer_and_devops_run_on_their_own_models(self):
+    def test_without_a_limit_jev_is_not_asked_and_each_role_runs_on_its_own_model(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        self.jev_answer.update(devops="gemini-4-neon")  # The reviewer's answer stays Sonnet 5.5, not its default.
-        _, review, tree = self.to_review()
-        self.assertEqual(review["arguments"]["target"]["model"], "gemini-4-neon", "the implementer's Astra is OpenAI's")
+        self.jev_answer.update(devops="gemini-4-neon")  # Answers Jev would give, which no role asks for.
+        call, review, tree = self.to_review()
+        self.assertEqual(call["arguments"]["target"]["model"], "claude-opus-5-5")
+        self.assertEqual(review["arguments"]["target"]["model"], "gpt-6.2-astra", "the implementer's Opus is Anthropic's")
         head = git(tree, "rev-parse", "HEAD")
         self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve", "--sha", head)["ok"])
         (devops,) = self.start()
         self.assertEqual(devops["arguments"]["target"]["model"], "claude-sonnet-5-5")
-        self.assertEqual(self.jev_roles, ["implementer"])
+        self.assertEqual(getattr(self, "jev_roles", []), [])
 
     def test_a_reviewer_whose_model_is_at_its_usage_limit_runs_on_jevs_stand_in_from_another_provider(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        self.bind(picks={"reviewer": "claude-opus-5-5"})
+        self.bind(picks={"reviewer": "claude-opus-5-5", "implementer": "gpt-6.2-astra"})
         self.queue("Fix the login typo")
         (call,) = self.start()
         worker, token, tree = self.implement(call, "export const name = 1;\n", 7)
@@ -642,7 +670,7 @@ class FlowTests(unittest.TestCase):
         (review,) = self.start()
         self.assertEqual(review["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
                                                          "options": {"thought_level": "xhigh"}})
-        self.assertEqual(self.jev_roles, ["implementer", "reviewer"])
+        self.assertEqual(self.jev_roles, ["reviewer"])
         self.assertFalse([m for m in self.jev_models if m.startswith("claude-")], "no Claude model has capacity")
         self.assertIn("claude-opus-5-5 is at its usage limit, so a new reviewer runs on gemini-4-neon until it resets.",
                       self.last_step["tell"])
@@ -655,9 +683,9 @@ class FlowTests(unittest.TestCase):
             {"id": "seven_day_fable", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]})
         self.assertEqual(flow.t3_limits(), {"claudeAgent": {"fable"}})
         self.jev_answer["reviewer"] = "gemini-4-neon"
-        _, review, _ = self.to_review(picks={"reviewer": "claude-opus-5-5"})
+        _, review, _ = self.to_review(picks={"reviewer": "claude-opus-5-5", "implementer": "gpt-6.2-astra"})
         self.assertEqual(review["arguments"]["target"]["model"], "claude-opus-5-5")
-        self.assertEqual(self.jev_roles, ["implementer"])
+        self.assertEqual(getattr(self, "jev_roles", []), [])
 
     def test_a_model_the_user_picked_is_stood_in_for_at_its_limit_and_runs_again_once_it_resets(self):
         spent = {"codex": [{"id": "primary", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]}
@@ -685,47 +713,44 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
                                                        "options": {"thought_level": "xhigh"}})
 
-    def test_a_task_restarted_after_the_limit_reset_is_advised_afresh_and_leaves_its_stand_in(self):
-        spent = {"codex": [{"id": "primary", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]}
-        self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage=spent)
-        self.bind(picks={"reviewer": "claude-opus-5-5"})
+    def test_a_task_restarted_after_the_limit_reset_leaves_its_stand_in_for_the_default(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST[:1], usage={"claudeAgent": SPENT})
+        self.bind()
         self.jev_answer["implementer"] = "gemini-4-neon"
         self.queue("Fix the login typo")
         (call,) = self.start()
         self.assertEqual(call["arguments"]["target"]["model"], "gemini-4-neon")
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        self.jev_answer["implementer"] = "gpt-6.2-astra"
         self.assertTrue(self.orchestrator("restart", task="Fix the login typo", authorization="Restart it.")["ok"])
         fresh = [c for c in self.start() if c["tool"] == "delegate_task"]
-        self.assertEqual([c["arguments"]["target"]["model"] for c in fresh], ["gpt-6.2-astra"])
-        self.assertEqual(self.jev_roles, ["implementer", "implementer"])
+        self.assertEqual([c["arguments"]["target"]["model"] for c in fresh], ["claude-opus-5-5"])
+        self.assertEqual(self.jev_roles, ["implementer"], "no stand-in once Opus can start")
 
-    def test_an_implementer_stopped_by_its_models_quota_is_replaced_at_once_on_jevs_choice_among_models_with_capacity(self):
-        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        self.jev_answer["implementer"] = "gemini-4-neon"
+    def test_an_implementer_stopped_by_its_models_quota_is_replaced_at_once_on_jevs_stand_in_with_capacity(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST[:1])  # Opus runs here through Claude alone.
         self.bind()
         self.queue("Fix the login typo")
         (call,) = self.start()
+        self.assertEqual(call["arguments"]["target"]["model"], "claude-opus-5-5")
         self.jev_answer["implementer"] = "gpt-6.2-astra"
-        self.end(call, "failed", QUOTA_STOP)
+        self.end(call, "failed", CLAUDE_STOP)
         (fresh,) = self.start()
         self.assertEqual(fresh["tool"], "delegate_task", "no follow-up: it would stop at the same quota")
         self.assertNotEqual(fresh["worker"], call["worker"])
         self.assertEqual(fresh["arguments"]["target"]["model"], "gpt-6.2-astra")
-        self.assertNotIn("gemini-4-neon", self.jev_models, "Jev chooses among the models with capacity")
-        self.assertTrue(any("Fix the login typo" in line and "gemini-4-neon" in line for line in self.last_step["tell"]),
+        self.assertNotIn("claude-opus-5-5", self.jev_models, "Jev chooses among the models with capacity")
+        self.assertTrue(any("Fix the login typo" in line and "claude-opus-5-5" in line for line in self.last_step["tell"]),
                         self.last_step["tell"])
         self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
 
     def test_an_implementer_stopped_by_its_quota_mid_fix_tells_its_successor_why_the_pr_came_back(self):
-        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        self.jev_answer["implementer"] = "gemini-4-neon"
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST[:1])  # Opus runs here through Claude alone.
         _, review, tree = self.to_review()
         self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "changes",
                                     "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
         (fix,) = self.start()
         self.jev_answer["implementer"] = "gpt-6.2-astra"
-        self.end(fix, "failed", QUOTA_STOP)
+        self.end(fix, "failed", CLAUDE_STOP)
         (fresh,) = self.start()
         brief = fresh["arguments"]["task"]
         self.assertEqual(fresh["arguments"]["target"]["model"], "gpt-6.2-astra")
@@ -735,7 +760,7 @@ class FlowTests(unittest.TestCase):
 
     def test_a_reviewer_stopped_by_its_quota_moves_without_jevs_answer_to_the_best_scored_model_with_capacity(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        _, review, _ = self.to_review(picks={"reviewer": "claude-opus-5-5"})
+        _, review, _ = self.to_review(picks={"reviewer": "claude-opus-5-5", "implementer": "gpt-6.2-astra"})
         self.assertEqual(review["arguments"]["target"]["model"], "claude-opus-5-5")
         self.jev_answer = {}  # No Jev key: Jev never answers.
         self.end(review, "failed", CLAUDE_STOP)
@@ -827,7 +852,7 @@ class FlowTests(unittest.TestCase):
 
     def test_a_restart_during_a_limit_starts_the_new_worker_on_a_stand_in(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
-        _, review, _ = self.to_review(picks={"reviewer": "claude-opus-5-5"})
+        _, review, _ = self.to_review(picks={"reviewer": "claude-opus-5-5", "implementer": "gpt-6.2-astra"})
         self.assertEqual(review["arguments"]["target"]["model"], "claude-opus-5-5")
         self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage={"claudeAgent": SPENT})
         self.jev_answer["reviewer"] = "gemini-4-neon"
@@ -855,13 +880,12 @@ class FlowTests(unittest.TestCase):
         self.assertIn("claude-sonnet-5-5 is at its usage limit, so a new DevOps runs on gemini-4-neon until it resets.",
                       self.last_step["tell"])
 
-    def test_an_effort_the_user_sets_alone_holds_and_jev_still_picks_the_model(self):
-        self.jev_answer["implementer"] = "gpt-6.2-sol"
+    def test_an_effort_the_user_sets_alone_holds_and_the_model_stays_the_default(self):
         self.bind(picks={"implementer": {"effort": "max"}})
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         (call,) = self.orchestrator("next")["calls"]
-        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "codex", "model": "gpt-6.2-sol",
-                                                       "options": {"reasoningEffort": "max", "serviceTier": "default"}})
+        self.assertEqual(call["arguments"]["target"], {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5",
+                                                       "options": {"effort": "max"}})
 
     def test_a_pick_t3_does_not_list_is_refused_and_nothing_is_bound(self):
         self.t3_caches()
@@ -880,12 +904,12 @@ class FlowTests(unittest.TestCase):
         changed = self.orchestrator("pick", role="implementer", model="qwen/qwen3.8-flash", authorization="Use qwen for the implementer.")
         self.assertTrue(changed["ok"], changed)
         (call,) = self.orchestrator("next")["calls"]
-        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra", "the started implementer keeps Jev's model")
+        self.assertEqual(call["arguments"]["target"]["model"], "claude-opus-5-5", "the started implementer keeps its model")
         self.assertEqual(self.orchestrator("status")["models"]["implementer"],
                          {"model": "qwen/qwen3.8-flash", "modelSource": "pick", "effort": "xhigh", "effortSource": "default"})
         self.assertTrue(self.orchestrator("pick", role="implementer", model=None, authorization="Back to the default.")["ok"])
         self.assertEqual(self.orchestrator("status")["models"]["implementer"],
-                         {"model": None, "modelSource": "jev", "effort": "xhigh", "effortSource": "default"})
+                         {"model": "claude-opus-5-5", "modelSource": "default", "effort": "xhigh", "effortSource": "default"})
 
     def test_the_user_sets_a_roles_model_and_effort_apart_and_puts_each_back(self):
         self.t3_caches()
@@ -1000,8 +1024,7 @@ class FlowTests(unittest.TestCase):
     def test_each_confirmed_start_names_its_role_task_model_effort_and_why_once(self):
         call, review, tree = self.to_review()
         self.assertEqual(self.last_done["tell"],
-                         ["Reviewer for Fix the login typo (M30) started on gemini-4-neon at xhigh (a different "
-                          "family than the implementer's gpt-6.2-astra)."])
+                         ["Reviewer for Fix the login typo (M30) started on gpt-6.2-astra at xhigh (the default)."])
         self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve",
                                     "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
         self.start()
@@ -1016,12 +1039,7 @@ class FlowTests(unittest.TestCase):
         self.assertFalse(any("started on" in line for line in step["tell"]), "nothing is told before T3 confirms the start")
         self.start()
         self.assertEqual(self.last_done["tell"],
-                         ["Implementer for Fix the login typo (M30) started on gpt-6.2-astra at xhigh (Jev's choice)."])
-        self.jev_answer = {}  # Jev gives no answer.
-        self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
-        self.start()
-        self.assertEqual(self.last_done["tell"], ["Implementer for Add a footer (M30) started on claude-opus-5-5 at xhigh "
-                                                  "(the fallback, as Jev gave no answer)."])
+                         ["Implementer for Fix the login typo (M30) started on claude-opus-5-5 at xhigh (the default)."])
 
     def test_a_picked_model_and_a_stand_in_say_so_when_they_start(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
@@ -1056,7 +1074,7 @@ class FlowTests(unittest.TestCase):
         (review,) = self.start()
         arguments = review["arguments"]
         self.assertEqual((arguments["isolation"], arguments["role"]), ("shared", "review"))
-        self.assertEqual(arguments["target"]["model"], "gemini-4-neon", "not the family of the implementer's Astra")
+        self.assertEqual(arguments["target"]["model"], "gpt-6.2-astra", "not the family of the implementer's Opus")
         head = git(tree, "rev-parse", "HEAD")
         self.assertIn(head, arguments["task"])
         self.assertIn(str(tree.resolve()).replace("\\", "/"), arguments["task"])
@@ -1691,19 +1709,29 @@ class FlowTests(unittest.TestCase):
 
     def test_after_three_review_rounds_restart_gives_the_pr_to_a_new_implementer_on_another_model(self):
         call, tree, ask = self.rounds_ask()
-        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra")
+        self.assertEqual(call["arguments"]["target"]["model"], "claude-opus-5-5")
         self.assertTrue(self.orchestrator("answer", ask=ask["id"], answer="restart")["ok"])
         cancel, fresh = self.start()  # The old implementer's run had not ended here, so it is cancelled.
         self.assertEqual((cancel["tool"], cancel["worker"]), ("task_cancel", call["worker"]))
         self.assertEqual(fresh["tool"], "delegate_task")
         self.assertNotEqual(fresh["worker"], call["worker"])
-        self.assertEqual(fresh["arguments"]["target"]["model"], "claude-opus-5-5",
-                         "Jev named the model that held it, so the fallback runs")
-        self.assertNotIn("gpt-6.2-astra", self.jev_models, "Jev weighs only the other models")
+        self.assertEqual(fresh["arguments"]["target"]["model"], "gpt-6.2-astra", "Jev's choice")
+        self.assertNotIn("claude-opus-5-5", self.jev_models, "Jev weighs only the other models")
+        self.assertEqual(self.last_done["tell"], ["Implementer for Fix the login typo (M30) started on gpt-6.2-astra at "
+                                                  "xhigh (Jev's choice)."])
         brief = fresh["arguments"]["task"]
         self.assertIn("PR #7 already holds this task's work", brief)
         self.assertIn("It came back because: The reviewer asked for changes on PR #7 3 times", brief)
         self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
+
+    def test_after_three_review_rounds_restart_without_jevs_answer_runs_the_best_scored_other_model(self):
+        call, tree, ask = self.rounds_ask()
+        self.jev_answer = {"implementer": "claude-opus-5-5"}  # The model that held it is not an option, so no answer.
+        self.assertTrue(self.orchestrator("answer", ask=ask["id"], answer="restart")["ok"])
+        _, fresh = self.start()
+        self.assertEqual(fresh["arguments"]["target"]["model"], "gemini-4-neon", "the best average of the other models")
+        self.assertEqual(self.last_done["tell"], ["Implementer for Fix the login typo (M30) started on gemini-4-neon at "
+                                                  "xhigh (the best-scored model that could start, as Jev gave no answer)."])
 
     def test_after_three_review_rounds_restart_keeps_the_implementer_model_the_user_picked(self):
         self.t3_caches()

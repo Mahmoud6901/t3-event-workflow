@@ -106,9 +106,13 @@ class PartsReportTests(unittest.TestCase):
         return result
 
     def test_jev_failing_to_answer_is_a_problem_and_its_next_answer_clears_it(self):
-        # The implementer falls back to the default when Jev is down, so nobody would otherwise learn of it.
+        # A stand-in falls back to the best scored when Jev is down, so nobody would otherwise learn of it.
         def down(config, context, role):
             raise RuntimeError("Jev did not decide: http_500_provider_unavailable")
+
+        spent = patch.object(flow, "t3_limits", return_value={"claudeAgent": {""}, "antigravity": {""}})
+        spent.start()  # Opus has no route with capacity, so each implementer asks Jev for a stand-in.
+        self.addCleanup(spent.stop)
 
         self.op(down, "init", workspace=str(self.state / "app"), repo="owner/app", requiredChecks=["acceptance"], noChecksReason="Test")
         self.op(down, "control", action="activate", authorization="Go.")
