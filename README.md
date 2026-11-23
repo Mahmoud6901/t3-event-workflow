@@ -18,7 +18,7 @@ Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/) (or pipx), Git, the
 signed in), and T3 Code with at least one of Claude, Codex, goose (for OpenRouter) or Antigravity signed in. The
 orchestrator runs on Claude Code (`claude`) or Codex (`codex`), so one of them must be on PATH.
 
-The default models are Opus 5.5 for reviewers at `xhigh` effort and Sonnet 5.5 for DevOps at `high`.
+The default models are GPT-6.2 Astra for reviewers at `xhigh` effort and Sonnet 5.5 for DevOps at `high`.
 Implementers have no default model: Jev chooses one for each task. You can choose each role's model,
 its effort, or both, at setup or later: any model your T3 runs, at any effort T3 offers for it. Setup
 checks which models your T3 can run, and asks you to pick one for any role it cannot start.

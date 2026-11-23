@@ -35,7 +35,7 @@ EFFORTS = ("low", "medium", "high", "xhigh", "max")
 ROLES = ("implementer", "reviewer", "devops")
 MODELS = {
     "gpt-6.2-sol": {"provider": "codex", "roles": ["implementer"]},
-    "gpt-6.2-astra": {"provider": "codex", "roles": ["implementer"]},
+    "gpt-6.2-astra": {"provider": "codex", "roles": ["implementer", "reviewer"]},
     "gemini-4-neon": {"provider": ANTIGRAVITY, "roles": ["implementer", "reviewer", "devops"]},
     "claude-sonnet-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
     "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["reviewer", "devops"]},
@@ -45,8 +45,9 @@ RETIRED = {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "deepseek/deepseek-v4.1-f
            "google/gemini-4-neon",  # Neon runs on Antigravity.
            "claude-haiku-5-5", "deepseek/deepseek-v4.1-flash-1017",
            "z-ai/glm-5.3-prime"}  # Gone from every project's list, even one bound with them.
-DEFAULTS = {"implementerEffort": "xhigh", "reviewer": "claude-opus-5-5", "reviewerEffort": "xhigh",
+DEFAULTS = {"implementerEffort": "xhigh", "reviewer": "gpt-6.2-astra", "reviewerEffort": "xhigh",
             "devops": "claude-sonnet-5-5", "devopsEffort": "high"}  # No implementer model: Jev chooses it, else best_scored.
+SHIPPED = {"reviewer": "claude-opus-5-5"}  # Defaults an earlier version shipped, which a binding it made still stores.
 QUIET_MINUTES = 30
 NUDGES = 1  # Follow-ups asking a worker that ended without its closing command to finish; then the task is blocked.
 REVIEW_ROUNDS = 3  # Reviews asking for changes before the user decides how the task goes on.
@@ -485,9 +486,18 @@ class Flow:
         # A model approved after the project was bound joins its list and a retired one leaves it, its default giving
         # way to the current one. An implementer default an older version stored goes: Jev chooses that model. Jev
         # weighs only the models T3 runs at the time.
-        config["models"] = {m: item for m, item in {**MODELS, **(config.get("models") or {})}.items() if m not in RETIRED}
+        # A role a shipped model gained since joins its stored entry, and a default an earlier version shipped moves to
+        # the current one once T3 runs it; a model the user picked stays theirs.
+        stored = config.get("models") or {}
+        config["models"] = {m: {**item, "roles": list(dict.fromkeys([*item.get("roles", []), *MODELS[m]["roles"]]))}
+                            if m in MODELS and m in stored else item
+                            for m, item in {**MODELS, **stored}.items() if m not in RETIRED}
         config["defaults"] = {key: DEFAULTS[key] if value in RETIRED else value for key, value in config["defaults"].items()
                               if key in DEFAULTS}
+        for role, old in SHIPPED.items():
+            new = DEFAULTS[role]
+            if config["defaults"].get(role) == old and runs(t3_lists()[0], new, config["models"][new]["provider"]) is not False:
+                config["defaults"][role] = new
         return config, json.loads(row[1])
 
     def transact(self, project, change, op):

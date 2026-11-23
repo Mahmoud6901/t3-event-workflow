@@ -22,7 +22,7 @@
   ],
   "defaults": {
     "implementerEffort": "xhigh",
-    "reviewer": "claude-opus-5-5",
+    "reviewer": "gpt-6.2-astra",
     "reviewerEffort": "xhigh",
     "devops": "claude-sonnet-5-5",
     "devopsEffort": "high"
@@ -37,7 +37,8 @@
     "gpt-6.2-astra": {
       "provider": "codex",
       "roles": [
-        "implementer"
+        "implementer",
+        "reviewer"
       ]
     },
     "gemini-4-neon": {
