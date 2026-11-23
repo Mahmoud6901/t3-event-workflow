@@ -39,8 +39,8 @@ step 1:
   stop: T3 needs Claude, Codex, goose or Antigravity enabled and signed in.
 - Then, for the implementer, the reviewer and DevOps in turn, show the role's default model and
   effort from `defaults`, and ask for a model, an effort, both, or a skip. The implementer has no
-  default model: Jev chooses one per task, and without Jev's answer it runs on the best-scored approved
-  model T3 runs, its `fallback`. When `runs` is false, this T3 cannot run the default (for the
+  default model: Jev chooses one per task, and without Jev's answer it runs on its `fallback`: Opus 5.5,
+  else the best-scored approved model T3 runs. When `runs` is false, this T3 cannot run the default (for the
   implementer, any approved model), so the user picks a model; `init` refuses that role without one.
 - Search with the user's words and show the matches with their `provider`; `more` counts the ones not
   shown. Offer only a model the list returned.
@@ -51,9 +51,10 @@ step 1:
   skipped one is the default, `xhigh` for the implementer. A reviewer and DevOps run on the user's
   choice, else the default. A reviewer of the same family as the model that wrote its PR (its maker:
   Anthropic, OpenAI, Google) runs instead on the best-scored approved reviewer of another family.
-- While a model is at its usage limit (T3 shows it spent, or a worker's run stopped at its quota), Jev
-  starts that role's new workers on an approved model with capacity, over the user's choice too, until
-  the limit resets.
+- A model runs on its first route with capacity (Opus: Claude, Antigravity, then goose). Paid goose
+  routes are offered only while no subscription route has capacity. While a model has no route with
+  capacity (T3 shows it spent, or a run stopped at its quota), Jev starts that role's new workers on an
+  approved model with capacity, over the user's choice too, until the limit resets.
 
 Add the choices to `init`, leaving out what the user skipped:
 `"picks":{"reviewer":{"model":"<model>","effort":"max"},"implementer":{"effort":"xhigh"}}`.

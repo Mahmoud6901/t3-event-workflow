@@ -2,7 +2,8 @@
 
 The harness owns the workflow and its defaults. This module only builds one request, validates one response and keeps
 the valid choices; anything missing or invalid is left to the harness (flow.default_jev): an implementer's model to the
-best-scored one it can run (ranked), the rest to the defaults.
+fallback or the best scored (ranked) of its options, the rest to the defaults. Jev reads each option's ability card
+(assets/cards.json), its record in the owner's projects, its board scores (assets/scores.json) and its route.
 """
 
 from __future__ import annotations
@@ -23,8 +24,6 @@ DEFAULT_KEY_FILE = "secrets/typesafe-api-key.txt"
 MAX_RESPONSE_BYTES = 256_000
 TIMEOUT_SECONDS = 20
 ROLES = ("implementer", "reviewer", "devops")
-PROVIDER_LABELS = {"codex": "OpenAI via Codex", "claudeAgent": "Anthropic via Claude", "acpRegistry_goose": "OpenRouter via goose",
-                   "antigravity": "Google via Antigravity"}
 SCORES_FILE = Path(__file__).resolve().parent.parent / "assets" / "scores.json"  # Refreshed by scores.py.
 CARDS_FILE = Path(__file__).resolve().parent.parent / "assets" / "cards.json"  # One ability card per approved model.
 USE_WINDOWS_CURL = os.name == "nt"
@@ -75,15 +74,15 @@ def _meaning(boards):
     """What the options' scores are and measure, board by board and suite by suite, ending in a space; "" without any."""
     if not boards:
         return ""
-    return ("Each option shows its scores on boards whose maintainers run every model themselves on tasks they do not "
-            "publish, higher being better; a model a board has not scored is unknown there, not weaker. "
+    return ("Scores come from boards whose maintainers run every model on tasks they do not publish, higher being "
+            "better; unknown there is not weaker. "
             + " ".join(board["label"] + (f", scored {board['scale']}" if board.get("scale") else "") + ": "
                        + "; ".join(f"{suite['name']}, {suite['measures']}" for suite in (board.get("suites") or {}).values())
                        + "." for board in boards.values()) + " ")
 
 
-def _label(model_id, spec, boards):
-    """The option Jev reads: the model, its scores on each board (a stand-in's, named as such), and who runs it."""
+def _scored(model_id, boards):
+    """The model's scores on each board, as one line (a stand-in's named as such)."""
     shown = []
     for board in boards.values():
         found = (board.get("models") or {}).get(model_id) or {}
@@ -91,12 +90,35 @@ def _label(model_id, spec, boards):
                            if key in found)
         stand_in = f"{found['borrowedFrom']}'s " if scored and found.get("borrowedFrom") else ""
         shown.append(f"{stand_in}{board['label']} {scored or 'unknown'}")
-    return f"{model_id} ({'; '.join(shown) or 'no scores'}; {PROVIDER_LABELS.get(spec.get('provider'), spec.get('provider'))})"
+    return "; ".join(shown) or "unknown"
+
+
+def _label(model_id, spec, boards, card):
+    """The option Jev reads: the model; what its card says it is good and weak at; its record in the owner's projects;
+    its scores; and whether its route is a subscription or paid per token."""
+    route = spec.get("route") or {"provider": spec.get("provider")}
+    paid = route.get("paid", route.get("provider") == "acpRegistry_goose")
+    return (f"{model_id}. Good at: {'; '.join(card.get('good_at') or []) or 'unknown'}. "
+            f"Weak at: {'; '.join(card.get('weak_at') or []) or 'unknown'}. "
+            f"Record in the owner's projects: {spec.get('record') or 'no record yet'}. "
+            f"Scores: {_scored(model_id, boards)}. {'Paid per token' if paid else 'Subscription'}.")
+
+
+INSTRUCTIONS = (
+    "Choose the approved {role} model most likely to get this task right the first time. First size the change from "
+    "the task itself, not from how long its brief is or the rules every task of its plan repeats: small and contained "
+    "(a fix or tweak in a few places, with a clear finish), large (a feature across many files, a migration, a long "
+    "investigation, many steps), or between. Then choose the option whose strengths fit this task's size and kind and "
+    "whose weaknesses matter least for it. Each option shows what its card says it is good and weak at (a maker's "
+    "claim is marked so), its record in the owner's projects by size, its published scores, and whether it is a "
+    "subscription or paid per token. Once a record covers several tasks of this size, it outweighs published scores "
+    "and makers' claims. The scores are one piece of evidence, not the rule. {meaning}Price is not a reason either "
+    "way. Choose even when uncertain, and report your confidence honestly.")
 
 
 def build_request(config, context, purpose="task", role="implementer"):
     """The Jev request for one role of one task. Raises ValueError for another purpose or role, or a context JSON
-    cannot hold."""
+    cannot hold. Each option's spec may carry its route and its record line (flow.Flow.ask_jev adds them)."""
     if purpose != "task":
         raise ValueError("purpose must be 'task'")
     if role not in ROLES:
@@ -105,19 +127,11 @@ def build_request(config, context, purpose="task", role="implementer"):
         context = json.loads(json.dumps(context, ensure_ascii=False))
     except (TypeError, ValueError):
         raise ValueError("context must be JSON serializable") from None
-    questions, scores = {}, _scores()
-    options = {model_id: _label(model_id, spec, scores) for model_id, spec in _eligible(config, role).items()}
-    # No lean toward the defaults or toward the cheaper: Jev weighs every approved model by what it can do for this task.
-    questions[role] = _choice(
-        f"Choose the approved {role} model most likely to get this task right the first time, matched to the size of "
-        "the change the task asks for. Judge that size by the change itself, not by how long its brief is or the rules "
-        "every task of its plan repeats. A small, contained change (a fix or tweak in a few places, with a clear "
-        "finish) goes to the model strongest on short, scoped coding work; a large, multi-step or open-ended one (a "
-        "feature across many files, a migration, a long investigation) goes to the model strongest on long-running "
-        f"work; between the two, weigh both. Price is not a reason either way. {_meaning(scores)}Choose even when "
-        "uncertain, and report your confidence honestly.",
-        options,
-    )
+    questions, scores, known = {}, _scores(), cards()
+    options = {model_id: _label(model_id, spec, scores, known.get(model_id) or {})
+               for model_id, spec in _eligible(config, role).items()}
+    # No lean toward the defaults or toward the cheaper: Jev weighs every option by what it can do for this task.
+    questions[role] = _choice(INSTRUCTIONS.format(role=role, meaning=_meaning(scores)), options)
     return {"model": config.get("jev", {}).get("model"), "state": {"purpose": purpose, "context": context},
             "questions": questions}
 

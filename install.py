@@ -179,7 +179,7 @@ class Installer:
     def goose_models(self):
         sys.path.insert(0, str(ROOT / "scripts"))
         import flow
-        return [m for m, spec in flow.MODELS.items() if spec["provider"] == flow.GOOSE]
+        return [r["model"] for m, spec in flow.MODELS.items() for r in flow.routes(spec, m) if r["provider"] == flow.GOOSE]
 
     def t3_running(self):
         try:

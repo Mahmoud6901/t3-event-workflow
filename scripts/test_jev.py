@@ -36,19 +36,25 @@ class TaskAdviceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             jev.build_request(CONFIG, {}, "task", "orchestrator")
 
-    def test_each_model_shows_its_livebench_scores_and_jev_is_told_what_each_suite_measures(self):
-        config = {**CONFIG, "models": {**flow.MODELS, "made-up/model": {"provider": "codex", "roles": ["implementer"]}}}
-        questions = jev.build_request(config, {"request": "Fix the login typo"}, "task")["questions"]
-        criteria = questions["implementer"]["criteria"]
-        self.assertRegex(criteria["gpt-6.2-sol"],
-                         r"^gpt-6\.2-sol \(LiveBench 2\.0 Coding \d+\.\d, Long Agentic \d+\.\d; OpenAI via Codex\)$")
-        self.assertEqual(criteria["made-up/model"], "made-up/model (LiveBench 2.0 unknown; OpenAI via Codex)")
-        self.assertIn("LiveBench 2.0", questions["implementer"]["instructions"])
-        self.assertIn("real merged-PR bug fixes", questions["implementer"]["instructions"])
-        reviewer = jev.build_request(CONFIG, {}, "task", "reviewer")["questions"]["reviewer"]
-        self.assertRegex(reviewer["criteria"]["gemini-4-neon"],
-                         r"^gemini-4-neon \(LiveBench 2\.0 Coding \d+\.\d, Long Agentic \d+\.\d; Google via Antigravity\)$")
-        self.assertIn("LiveBench 2.0", reviewer["instructions"])
+    def test_each_option_shows_its_card_its_record_its_scores_and_its_route(self):
+        config = {**CONFIG, "models": {
+            "gpt-6.2-sol": {**flow.MODELS["gpt-6.2-sol"], "record": "small: 3 tasks, 3 approved first time"},
+            "qwen/qwen4-max": {**flow.MODELS["qwen/qwen4-max"], "route": {"provider": "acpRegistry_goose", "paid": True}},
+            "made-up/model": {"provider": "codex", "roles": ["implementer"]}}}
+        with patch.object(jev, "_scores", return_value={"livebench": {
+                "label": "LiveBench 2.0", "suites": {"coding": {"name": "Coding", "measures": "bug fixes"}},
+                "models": {"gpt-6.2-sol": {"coding": 83.7}}}}):
+            question = jev.build_request(config, {"request": "Fix the login typo"}, "task")["questions"]["implementer"]
+        card = jev.cards()["gpt-6.2-sol"]
+        self.assertEqual(question["criteria"]["gpt-6.2-sol"], (
+            f"gpt-6.2-sol. Good at: {'; '.join(card['good_at'])}. Weak at: {'; '.join(card['weak_at'])}. "
+            "Record in the owner's projects: small: 3 tasks, 3 approved first time. Scores: LiveBench 2.0 Coding 83.7. "
+            "Subscription."))
+        self.assertTrue(question["criteria"]["qwen/qwen4-max"].endswith(
+            "Record in the owner's projects: no record yet. Scores: LiveBench 2.0 unknown. Paid per token."))
+        self.assertEqual(question["criteria"]["made-up/model"], "made-up/model. Good at: unknown. Weak at: unknown. "
+                         "Record in the owner's projects: no record yet. Scores: LiveBench 2.0 unknown. Subscription.")
+        self.assertIn("LiveBench 2.0: Coding, bug fixes.", question["instructions"])
 
     def test_each_board_and_suite_in_the_scores_reaches_jev_and_a_board_without_a_model_shows_it_unknown(self):
         boards = {"livebench": {"label": "LiveBench 2.0", "scale": "0 to 100",
@@ -61,31 +67,43 @@ class TaskAdviceTests(unittest.TestCase):
                             "models": {"gpt-6.2-astra": {"private": 0.5}}}}
         with patch.object(jev, "_scores", return_value=boards):
             question = jev.build_request(CONFIG, {}, "task")["questions"]["implementer"]
-        self.assertEqual(question["criteria"]["gpt-6.2-sol"],
-                         "gpt-6.2-sol (LiveBench 2.0 Coding 83.7, Browser Use 88.2; Other Board unknown; OpenAI via Codex)")
-        self.assertEqual(question["criteria"]["gpt-6.2-astra"],
-                         "gpt-6.2-astra (gpt-6.2's LiveBench 2.0 Coding 91.9; Other Board Private 0.5; OpenAI via Codex)")
+        self.assertIn("Scores: LiveBench 2.0 Coding 83.7, Browser Use 88.2; Other Board unknown.",
+                      question["criteria"]["gpt-6.2-sol"])
+        self.assertIn("Scores: gpt-6.2's LiveBench 2.0 Coding 91.9; Other Board Private 0.5.",
+                      question["criteria"]["gpt-6.2-astra"])
         self.assertIn("LiveBench 2.0, scored 0 to 100: Coding, real merged-PR bug fixes; Browser Use, multi-step tasks in "
                       "web apps.", question["instructions"])
         self.assertIn("Other Board, scored share solved, 0 to 1: Private, unpublished programs.", question["instructions"])
-        self.assertIn("unknown there, not weaker", question["instructions"])
+        self.assertIn("unknown there is not weaker", question["instructions"])
 
     def test_jev_weighs_how_strong_each_model_is_and_not_what_it_costs(self):
         questions = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task")["questions"]
         self.assertIn("right the first time", questions["implementer"]["instructions"])
+        self.assertIn("Price is not a reason either way.", questions["implementer"]["instructions"])
         asked = json.dumps(questions).lower()
         self.assertNotIn("tier", asked)
         self.assertNotIn("cheap", asked)
 
-    def test_jev_matches_the_model_to_the_size_of_the_change_the_task_asks_for(self):
+    def test_jev_sizes_the_change_from_the_task_and_fits_strengths_and_weaknesses_to_it(self):
         instructions = jev.build_request(CONFIG, {"request": "Fix the login typo"}, "task")["questions"]["implementer"][
             "instructions"]
-        self.assertIn("matched to the size of the change the task asks for", instructions)
-        self.assertIn("not by how long its brief is or the rules every task of its plan repeats", instructions)
-        self.assertIn("A small, contained change", instructions)
-        self.assertIn("short, scoped coding work", instructions)
-        self.assertIn("long-running work", instructions)
-        self.assertNotIn("Capability comes first", instructions, "the strongest model no longer wins by default")
+        self.assertIn("First size the change from the task itself, not from how long its brief is or the rules every "
+                      "task of its plan repeats", instructions)
+        self.assertIn("small and contained", instructions)
+        self.assertIn("the option whose strengths fit this task's size and kind and whose weaknesses matter least",
+                      instructions)
+        self.assertIn("Once a record covers several tasks of this size, it outweighs published scores and makers' "
+                      "claims.", instructions)
+        self.assertIn("The scores are one piece of evidence, not the rule.", instructions)
+        self.assertNotIn("strongest on", instructions, "no single score decides any more")
+
+    def test_the_whole_request_stays_compact_with_every_option(self):
+        config = {**CONFIG, "models": {m: {**item, "record": "small: 12 tasks, 10 approved first time, 1.2 review "
+                                           "rounds on average, 1 blocked; medium: 4 tasks, 3 approved first time, 0.8 "
+                                           "review rounds on average"} for m, item in flow.MODELS.items()}}
+        payload = jev.build_request(config, {"request": "Fix the login typo", "brief": "x" * 2000, "plan": "M30"}, "task")
+        self.assertEqual(len(payload["questions"]["implementer"]["criteria"]), len(flow.MODELS) - 1)
+        self.assertLess(len(json.dumps(payload)), 14000)
 
     def test_a_valid_choice_is_kept_and_an_invalid_one_is_left_to_the_harness(self):
         payload = jev.build_request(CONFIG, {}, "task")

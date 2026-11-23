@@ -122,7 +122,7 @@ A refused command changes nothing. Its error says what to do.
 
 `init` creates a binding, paused; [setup](setup.md#3-bind-it) lists its fields.
 
-Jev picks, per task, an implementer's model left open, never an effort; a stand-in at a usage limit. No answer: the best-scored model with capacity.
+Jev picks an implementer's open model (no effort) and stand-ins at a limit. No answer: Opus 5.5, else the best-scored with capacity.
 
 **Problems:** `status` lists any background part (watcher scan, its sends, hooks, Jev, GitHub, a
-checkout) that failed three times in a row, until it next succeeds.
+checkout, the record) that failed three times in a row, until it next succeeds.

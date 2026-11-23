@@ -18,21 +18,33 @@ Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/) (or pipx), Git, the
 signed in), and T3 Code with at least one of Claude, Codex, goose (for OpenRouter) or Antigravity signed in. The
 orchestrator runs on Claude Code (`claude`) or Codex (`codex`), so one of them must be on PATH.
 
-The default models are GPT-6.2 Astra for reviewers at `xhigh` effort and Sonnet 5.5 for DevOps at `high`.
+Only a model with an ability card in `assets/cards.json` is approved. The card says what the model is
+good and weak at in coding-agent work, from independent boards where they exist and from its maker
+otherwise, with the date its sources were read. Every approved model but Fable 5.2 can implement;
+Astra, Opus, Sonnet, Neon and Gemini 4 Carbon can review; Sonnet, Opus and Neon can run DevOps. The
+default models are GPT-6.2 Astra for reviewers at `xhigh` effort and Sonnet 5.5 for DevOps at `high`.
 Implementers have no default model: Jev chooses one for each task. You can choose each role's model,
 its effort, or both, at setup or later: any model your T3 runs, at any effort T3 offers for it. Setup
 checks which models your T3 can run, and asks you to pick one for any role it cannot start.
 
-With a Jev key, Jev chooses the model of each task's implementer where you left it open, seeing each
-approved model's [LiveBench 2.0](https://livebench.ai/) scores, from tasks the board does not
-publish. It matches the model to the size of the change the task asks for, not to how long its brief
-is: a small, contained change goes to the model strongest on Coding, and a large or multi-step one to
-the model strongest on Long Agentic. Without Jev's answer (no key, Jev unreachable, or an invalid reply), the implementer runs on
-the approved model with the best average score that T3 runs. Jev never sets an effort: an
-implementer runs at `xhigh` unless you choose another. Reviewers and DevOps run
-on your choice or the default. One exception: while a model is at its usage limit, Jev starts that
-role's new workers on an approved model with capacity, and they go back to your model when the limit
-resets.
+A model can have more than one route. Opus 5.5 runs through Claude, then Antigravity, then goose on
+OpenRouter; Sonnet 5.5 through Claude, then Antigravity; Astra through Codex, then goose; Neon through
+Antigravity, then goose. A worker starts on the first route T3 runs that has capacity, at the nearest
+effort that route offers at or below the one asked for, and its start line names the route when it is
+not the first. Goose routes, and the models that run only on goose, are paid per token. They are offered
+only while no subscription route of an approved model for the role has capacity, and the start line
+then says so. A model you pick runs as you picked it.
+
+With a Jev key, Jev chooses the model of each task's implementer where you left it open. For each
+option it reads the card, the model's record in your projects, its [LiveBench 2.0](https://livebench.ai/)
+scores and whether it is a subscription or paid. It sizes the change from the task, fits the
+strengths and weaknesses to it, and lets the record outweigh scores and claims once it holds several
+tasks of that size. Without Jev's answer (no key, Jev unreachable, an invalid reply, or a model it was
+not offered), the implementer runs on Opus 5.5 when one of its routes has capacity, else on the
+best-scored model that can start; its start line says which. Jev never sets an effort: an implementer
+runs at `xhigh` unless you choose another. Reviewers and DevOps run on your choice or the default.
+While that model has no route with capacity, Jev picks a stand-in among those with capacity, and new
+workers go back to your model when the limit resets.
 
 A reviewer is never of the same family as the model that wrote its PR. The family is the model's maker,
 whichever provider runs it: Anthropic for Claude, OpenAI for GPT, Google for Gemini. When the reviewer's
@@ -40,17 +52,11 @@ model, your choice included, is of the implementer's family, the reviewer runs o
 reviewer of another family that T3 runs and that has capacity. When there is none, it runs as before.
 
 A limit counts when T3 shows it as spent, or when a worker's run stopped at the model's quota, as
-in "Individual quota reached… Resets in 4h11m25s". That worker is not asked to finish, since it would
-stop the same way. A new one takes over its task at once, on Jev's choice among the models with
-capacity, or on the best-scored of them without Jev's answer. When no model the role can run on has
-capacity, the task waits for the reset, and the watcher wakes the orchestrator to start it then. A
-quota that names no reset is tried again after 30 minutes.
-
-`python scripts/scores.py` refreshes those scores. Jev sees the Coding and Long Agentic suites;
-`--suites coding,long_agentic,browser` adds others (`design`, `research`, `data_analysis`,
-`reasoning` too), and later refreshes keep the choice. Another board can join LiveBench when its
-maintainers run every model on tasks they do not publish and its data can be read without a key: it
-gets a reader in `BOARDS` in `scripts/scores.py`, and Jev shows a model it has not scored as unknown.
+in "Individual quota reached… Resets in 4h11m25s". It holds for that route alone. That worker is not
+asked to finish, since it would stop the same way. A new one takes over its task at once, on the
+model's next route or on Jev's choice among the models with capacity. When no model the role can run
+on has capacity, the task waits for the reset, and the watcher wakes the orchestrator to start it
+then. A quota that names no reset is tried again after 30 minutes.
 
 ```bash
 uv tool install git+https://github.com/Mahmoud6901/t3-event-workflow
@@ -68,8 +74,8 @@ Then:
 
 1. **Jev key (optional):** put the raw TypeSafe key on one line in
    `~/.t3-workflow/secrets/typesafe-api-key.txt`, or set `TYPESAFE_API_KEY`. Without it, an implementer
-   whose model you left open runs on the best-scored approved model T3 runs; the rest use the chosen
-   or default models.
+   whose model you left open runs on Opus 5.5, or on the best-scored model that can start; the rest use
+   the chosen or default models.
 2. **GitHub's `workflow` scope (optional):** run `gh auth refresh -s workflow` if git on this computer
    signs in through `gh` (`gh auth setup-git`). Without that scope, GitHub refuses pushes that change
    files in `.github/workflows/`, such as DevOps's pipeline fixes. With Git Credential Manager, pushes
@@ -109,6 +115,31 @@ yet by a real login; reports are welcome.
 Everything else stays in `~/.t3-workflow/`: `state/` (logs, health, backups, and each project's own
 copy in `state/homes/`) and `secrets/` belong to each computer. A clone that already has its own `state/`
 folder keeps using it instead.
+
+## The record
+
+When a task merges or is dropped, the workflow adds its counts to one record per computer:
+`~/.t3-workflow/state/record.sqlite3`, beside the installed copy's data and never inside a project.
+It keeps counts alone, by model, role and size: tasks finished, merged, approved at the first review,
+review rounds, blocked, replaced for being quiet, stopped at a quota, and dropped. It holds no names,
+paths, ids or dates. A task's size comes from its PR: small is at most 3 changed files and 100 changed
+lines (added plus deleted), large is more than 12 files or more than 600 lines, and the rest is medium.
+A dropped task counts under its PR's size when it was last seen, or as unknown without a PR. Jev reads
+each model's record as a line such as "small: 12 tasks, 10 approved first time, 1.2 review rounds on
+average, 1 blocked". A record that cannot be written fails nothing; `t3-workflow status` reports it.
+
+## Cards and scores
+
+Cards are written by hand from public sources. To add a model, give it a card in `assets/cards.json`
+(maker, the date read, two to four phrases each of good and weak, marked "(maker's claim)" where only
+its maker says so, and the sources) and an entry in `MODELS` in `scripts/flow.py`. Refresh a card when
+its sources change, and when a model is approved.
+
+`python scripts/scores.py` refreshes the scores. Jev sees the Coding and Long Agentic suites;
+`--suites coding,long_agentic,browser` adds others (`design`, `research`, `data_analysis`,
+`reasoning` too), and later refreshes keep the choice. A model the board does not list stays unknown.
+Another board can join LiveBench when its maintainers run every model on tasks they do not publish and
+its data can be read without a key: it gets a reader in `BOARDS` in `scripts/scores.py`.
 
 ## Each project apart
 
