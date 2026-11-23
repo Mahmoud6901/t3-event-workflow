@@ -6,7 +6,7 @@
 <title>T3 event workflow: plan in one thread, ship reviewed PRs</title>
 <meta name="description" content="A free, open-source workflow for T3 Code. You plan with one orchestrator session, and background workers implement, review and merge each task as a GitHub pull request.">
 <meta property="og:title" content="T3 event workflow: plan in one thread, ship reviewed PRs">
-<meta property="og:description" content="You plan with one orchestrator session in T3 Code. Implementer, reviewer and DevOps workers turn each task into a reviewed, merged pull request.">
+<meta property="og:description" content="You plan with one orchestrator session in T3 Code. A lead writes the spec you approve; implementer, reviewer, DevOps and docs workers turn each task into a reviewed, merged pull request.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#000000">
 <meta name="color-scheme" content="dark light">
@@ -92,13 +92,15 @@
 <main id="main" tabindex="-1">
 
 <section class="roles" id="roles" aria-labelledby="roles-title">
-  <h2 class="roles-title rise" id="roles-title" data-reveal><span class="line"><span>Four roles, one you talk to</span></span></h2>
+  <h2 class="roles-title rise" id="roles-title" data-reveal><span class="line"><span>Six roles, one you talk to</span></span></h2>
   <p class="roles-lead" data-reveal style="--i:1">You talk to one session, the orchestrator. The rest runs in the background as T3 delegated tasks, and every task ends as one pull request, reviewed at an exact commit.</p>
   <div class="roles-cols">
     <p data-reveal style="--i:2"><b>The orchestrator</b> plans the work with you and reports back. It edits nothing: its hook lets it run only <code>t3-workflow</code>, so every change reaches your code through a worker and a pull request. It runs on any Claude or Codex model you pick in T3.</p>
-    <p data-reveal style="--i:3"><b>An implementer</b> takes one task in its own T3 checkout, changes only that task’s paths, runs the project’s checks and opens one pull request. Review notes, conflicts and CI failures come back to the same implementer. Jev chooses its model for each task, else <span class="nw">Opus 5.5</span>, at xhigh.</p>
-    <p data-reveal style="--i:4"><b>A reviewer</b> reads the pull request at one commit, tries it where the project can be run, and changes nothing. It approves that exact commit with the <code>t3/review</code> status, or lists each blocking finding with its file and line. By default, <span class="nw">GPT-6.2 Astra</span> at xhigh.</p>
-    <p data-reveal style="--i:5"><b>DevOps</b> brings each confirmed pull request up to date, waits for CI and squash-merges it through GitHub. It owns the pipeline too, and fixes it in PRs of its own. Turn it off and the workflow merges with no model. By default, <span class="nw">Sonnet 5.5</span> at high.</p>
+    <p data-reveal style="--i:3"><b>A lead</b> reads the project and writes a spec for work of more than one task: the goal, what is in and out of scope, and open questions. It splits the work into tasks and edits nothing. No task starts until you approve it. By default, <span class="nw">Fable 5.2</span> at high.</p>
+    <p data-reveal style="--i:4"><b>An implementer</b> takes one task in its own T3 checkout, changes only that task’s paths, runs the project’s checks and opens one pull request. Review notes, conflicts and CI failures come back to the same implementer. Jev chooses its model for each task, else <span class="nw">Opus 5.5</span>, at xhigh.</p>
+    <p data-reveal style="--i:5"><b>A reviewer</b> reads the pull request at one commit, tries it where the project can be run, and changes nothing. It approves that exact commit with the <code>t3/review</code> status, or lists each blocking finding with its file and line. By default, <span class="nw">GPT-6.2 Astra</span> at xhigh.</p>
+    <p data-reveal style="--i:6"><b>DevOps</b> brings each confirmed pull request up to date, waits for CI and squash-merges it through GitHub. It owns the pipeline too, and fixes it in PRs of its own. Turn it off and the workflow merges with no model. By default, <span class="nw">Sonnet 5.5</span> at high.</p>
+    <p data-reveal style="--i:7"><b>A docs worker</b> updates the README and the other docs once a plan’s tasks are finished, in one pull request reviewed like any task. It changes no code. When nothing needs updating, it opens no pull request. Turn it off at setup or later. By default, <span class="nw">Gemini 4 Neon</span> at high.</p>
   </div>
 </section>
 
@@ -133,25 +135,27 @@
             <li style="--r:4"><span class="row-main">Implementer</span><span class="row-mid">GPT-6.2 Astra · xhigh</span><span class="row-side">Jev</span></li>
             <li style="--r:5"><span class="row-main">Reviewer</span><span class="row-mid">Sonnet 5.5 · max</span><span class="row-side">Your pick</span></li>
             <li style="--r:6"><span class="row-main">DevOps</span><span class="row-mid">Sonnet 5.5 · high</span><span class="row-side">Default</span></li>
+            <li style="--r:7"><span class="row-main">Lead</span><span class="row-mid">Fable 5.2 · high</span><span class="row-side">Default</span></li>
+            <li style="--r:8"><span class="row-main">Docs</span><span class="row-mid">Gemini 4 Neon · high</span><span class="row-side">Default</span></li>
           </ul>
         </div>
         <div class="panel-part" data-part="workers">
           <p class="part-name">Working</p>
           <ul class="ui-rows">
-            <li style="--r:7"><span class="row-main">Reviewer on #42</span><span class="row-mid"><i class="live"></i>reading</span><span class="row-side">6 min</span></li>
-            <li style="--r:8"><span class="row-main">Implementer, lockout</span><span class="row-mid"><i class="live"></i>working</span><span class="row-side">12 min</span></li>
+            <li style="--r:9"><span class="row-main">Reviewer on #42</span><span class="row-mid"><i class="live"></i>reading</span><span class="row-side">6 min</span></li>
+            <li style="--r:10"><span class="row-main">Implementer, lockout</span><span class="row-mid"><i class="live"></i>working</span><span class="row-side">12 min</span></li>
           </ul>
         </div>
         <div class="panel-part" data-part="asks">
           <p class="part-name">Asks</p>
-          <div class="ask" style="--r:9">
+          <div class="ask" style="--r:11">
             <p><b>a7</b> · #43 changes src/api/client.ts, outside src/login/. Merge, back or drop?</p>
             <span class="ask-opts"><span>merge</span><span>back</span><span>drop</span></span>
           </div>
         </div>
         <div class="panel-part" data-part="problems">
           <p class="part-name">Problems</p>
-          <p class="calm" style="--r:10"><i></i>None. Watcher, hooks, Jev and GitHub all answering.</p>
+          <p class="calm" style="--r:12"><i></i>None. Watcher, hooks, Jev and GitHub all answering.</p>
         </div>
       </div>
     </figure>
@@ -338,7 +342,7 @@
     </details>
     <details name="faq" data-reveal style="--i:5">
       <summary>Which models do the workers use?</summary>
-      <div class="faq-answer"><p>You choose each role’s model and effort, separately, at setup or later. Only a model with an ability card is offered. For an implementer you leave open, Jev chooses the model; without its answer, Opus 5.5 runs. While a model is at its usage limit, it runs on its next route, or Jev picks a stand-in until it resets. Paid OpenRouter models run only while every subscription is at its limit. Otherwise the defaults apply: GPT-6.2 Astra for reviewers at xhigh, and Sonnet 5.5 for DevOps at high. A reviewer never shares a maker with the model that wrote its pull request: when it would, the best-scored reviewer from another maker runs instead. Setup checks which models your T3 can run.</p></div>
+      <div class="faq-answer"><p>You choose each role’s model and effort, separately, at setup or later. Only a model with an ability card is offered. For an implementer you leave open, Jev chooses the model; without its answer, Opus 5.5 runs. While a model is at its usage limit, it runs on its next route, or Jev picks a stand-in until it resets. Paid OpenRouter models run only while every subscription is at its limit. Otherwise the defaults apply: GPT-6.2 Astra for reviewers at xhigh, Sonnet 5.5 for DevOps at high, Fable 5.2 for the lead at high, and Gemini 4 Neon for the docs worker at high. A reviewer never shares a maker with the model that wrote its pull request: when it would, the best-scored reviewer from another maker runs instead. Setup checks which models your T3 can run.</p></div>
     </details>
     <details name="faq" data-reveal style="--i:6">
       <summary>What is Jev, and do I need it?</summary>

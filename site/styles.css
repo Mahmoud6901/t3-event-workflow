@@ -233,7 +233,7 @@ section { padding-inline: var(--margin); }
 .roles { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gutter); }
 .roles-title { grid-column: 1 / -1; }
 .roles-lead { grid-column: 1 / 11; margin-top: clamp(1.75rem, 3vw, 2.5rem); font-size: var(--step-lead); line-height: 1.3; max-width: 58ch; }
-.roles-cols { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: var(--gutter); row-gap: 2.5rem; margin-top: clamp(3rem, 5vw, 4.5rem); align-items: start; }
+.roles-cols { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--gutter); row-gap: 2.5rem; margin-top: clamp(3rem, 5vw, 4.5rem); align-items: start; }
 .roles-cols p { line-height: 1.5; }
 .roles-cols b { font-weight: 700; color: var(--accent-text); }
 

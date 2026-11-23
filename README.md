@@ -1,10 +1,13 @@
 # T3 event workflow
 
 Run a GitHub project in [T3 Code](https://github.com/pingdotgg/t3code) through one session. You plan
-with the orchestrator and it reports to you. Implementers, reviewers and a DevOps worker run in the
-background as T3 delegated tasks. Each task becomes a branch and a pull request. A reviewer approves
-the exact commit it read, the orchestrator confirms it, and DevOps merges it through GitHub, where CI
-and branch protection have the last word. You can turn DevOps off at setup or later; then the
+with the orchestrator and it reports to you. A lead, implementers, reviewers, a DevOps worker and a
+docs worker run in the background as T3 delegated tasks. For work of more than one task, the lead
+reads the project and writes a spec and a task split, and nothing starts until you approve it. Each
+task becomes a branch and a pull request. A reviewer approves the exact commit it read, the
+orchestrator confirms it, and DevOps merges it through GitHub, where CI and branch protection have the
+last word. When a plan's tasks are finished, the docs worker updates the README and the other docs in
+one more pull request. You can turn the docs worker off. You can turn DevOps off at setup or later; then the
 workflow merges confirmed PRs itself, with no model. When GitHub cannot run CI, as when its billing
 stops Actions, you can turn CI off: PRs then merge on their local checks and review, until you turn it
 back on.
@@ -21,8 +24,10 @@ orchestrator runs on Claude Code (`claude`) or Codex (`codex`), so one of them m
 Only a model with an ability card in `assets/cards.json` is approved. The card says what the model is
 good and weak at in coding-agent work, from independent boards where they exist and from its maker
 otherwise, with the date its sources were read. Every approved model but Fable 5.2 can implement;
-Astra, Opus, Sonnet, Neon and Gemini 4 Carbon can review; Sonnet, Opus and Neon can run DevOps. The
-default models are GPT-6.2 Astra for reviewers at `xhigh` effort and Sonnet 5.5 for DevOps at `high`.
+Astra, Opus, Sonnet, Neon and Gemini 4 Carbon can review; Sonnet, Opus and Neon can run DevOps; Fable
+5.2 and Opus can lead; Neon, Sonnet and Opus can write the docs. The default models are GPT-6.2 Astra
+for reviewers at `xhigh` effort, Sonnet 5.5 for DevOps at `high`, Fable 5.2 for the lead at `high`, and
+Gemini 4 Neon for the docs worker at `high`.
 Implementers have no default model: Jev chooses one for each task. You can choose each role's model,
 its effort, or both, at setup or later: any model your T3 runs, at any effort T3 offers for it. Setup
 checks which models your T3 can run, and asks you to pick one for any role it cannot start.
@@ -42,7 +47,7 @@ strengths and weaknesses to it, and lets the record outweigh scores and claims o
 tasks of that size. Without Jev's answer (no key, Jev unreachable, an invalid reply, or a model it was
 not offered), the implementer runs on Opus 5.5 when one of its routes has capacity, else on the
 best-scored model that can start; its start line says which. Jev never sets an effort: an implementer
-runs at `xhigh` unless you choose another. Reviewers and DevOps run on your choice or the default.
+runs at `xhigh` unless you choose another. The other roles run on your choice or the default.
 While that model has no route with capacity, Jev picks a stand-in among those with capacity, and new
 workers go back to your model when the limit resets.
 
