@@ -1491,7 +1491,8 @@ class Flow:
                 "This task is not waiting for your pull request")
         require(not task.get("pr") or task["pr"] == args["pr"], f"This task's pull request is #{task.get('pr')}")
         rev = task["rev"]
-        pr, tree, evidence = self.submitted(config, project, task["id"], args)
+        decisions = task.get("kind") != "pipeline"  # A pipeline fix's later rounds come here too, and need none.
+        pr, tree, evidence = self.submitted(config, project, task["id"], args, decisions=decisions)
 
         def change(config, state):
             task = state["tasks"][worker["task"]]
@@ -1566,12 +1567,17 @@ class Flow:
                                                 "wakes you here to carry on. End your turn."}
         return self.transact(project, change, "waits")
 
-    def submitted(self, config, project, name, args):
-        """A worker's PR as it stands: open against the bound branch, the worker's clean checkout at its head, and the
-        binding's checks passing there. Returns (pr, checkout, evidence); a failed check refuses with its output."""
+    def submitted(self, config, project, name, args, decisions=False):
+        """A worker's PR as it stands: open against the bound branch, with a Decisions section in its body when
+        `decisions` asks, the worker's clean checkout at its head, and the binding's checks passing there. Returns (pr,
+        checkout, evidence); a failed check refuses with its output."""
         pr = self.hub_for(config["github"]["repo"]).pull(args["pr"])
         require(pr["state"] == "open" and pr["base"] == config["branch"],
                 f"PR #{args['pr']} must be open against {config['branch']}")
+        require(not decisions or has_decisions(pr.get("body")), (
+            f"PR #{args['pr']}'s body has no Decisions section. Add one at its end: a \"## Decisions\" heading, then "
+            f"each call your brief left open, what you chose and why, or \"None\" when there were none. Write the whole "
+            f"new body to a file, run gh pr edit {args['pr']} --body-file <that file>, then run this again."))
         tree = self.checkout(config, args.get("path") or Path.cwd(), pr)
         evidence = self.run_checks(config, project, name, tree, pr["head"])
         if not evidence["passed"]:
@@ -1980,6 +1986,26 @@ class Flow:
         state["tell"].append(f"Plan {name} done: {merged} merged{f', {dropped} dropped' if dropped else ''}.")
 
 
+DECISIONS = re.compile(r"^[ \t]*(#{1,6}[ \t]*)?(\*\*)?Decisions(?:\*\*)?[ \t]*(:)?(?:\*\*)?[ \t]*(.*)$",
+                       re.IGNORECASE | re.MULTILINE)
+
+
+def has_decisions(body):
+    """Whether a PR's body has a Decisions section with something in it: a line that is a "Decisions" heading (or
+    "Decisions:"), with text after it on that line or on the next line that is not blank and not another heading."""
+    body = (body or "").replace("\r\n", "\n")
+    for found in DECISIONS.finditer(body):
+        marked, rest = any(found.group(i) for i in (1, 2, 3)), found.group(4).strip()
+        if rest:
+            if marked:
+                return True
+            continue  # A sentence that starts with the word.
+        after = next((line.strip() for line in body[found.end():].split("\n") if line.strip()), "")
+        if after and not after.startswith("#"):
+            return True
+    return False
+
+
 def named_paths(words):
     """The file paths a worker's words name: a word with a slash or a file extension."""
     found = re.findall(r"[\w.\-/]+", words.replace("\\", "/"))
@@ -2029,7 +2055,8 @@ def implementer_brief(config, state, task, worker):
     else:
         start = (f"Your checkout is new. Start with: git fetch origin {branch} && git reset --hard origin/{branch}",
                  f"When the work is done: commit, git push -u origin HEAD, then gh pr create --base {branch} "
-                 f"--title \"{task['plan']}: {task['task']}\" with a body saying what changed, why, and how you checked it.")
+                 f"--title \"{task['plan']}: {task['task']}\" with a body saying what changed, why, and how you checked it, "
+                 f"and a Decisions section.")
     return "\n".join([
         f"You are the implementer of one task in the t3 workflow. First read {slash(ROOT / 'references' / 'implementer.md')}.",
         f"Plan: {task['plan']}. Task: {task['task']}.",
@@ -2039,6 +2066,8 @@ def implementer_brief(config, state, task, worker):
         start[0],
         f"Keep this checkout's branch name. Never push to {branch}, never force-push, never merge.",
         start[1],
+        "The PR's body ends with a \"## Decisions\" section: each call this brief left open, what you chose and why, "
+        "or \"None\" when there were none. worker pr refuses a PR without one.",
         f"Then run: {command('worker', 'pr', me, '--pr', str(task['pr']) if task.get('pr') else '<number>')}",
         "It runs the project's checks in this folder. If it refuses, fix what it names, push, and run it again. "
         "When it succeeds, end your turn.",
@@ -2145,6 +2174,9 @@ def reviewer_brief(config, task, worker):
         f"The implementer's checkout is {tree}. Read and test there; change nothing in it: no edits, commits or pushes.",
         f"The change: git -C {tree} diff origin/{branch}...{head}",
         *reviewed_before(config, task, tree),
+        f"Check each decision in the PR body's Decisions section (gh pr view {task['pr']} --repo "
+        f"{config['github']['repo']}) against the brief. One that changes what the task asks for, or that the user "
+        f"should have made, is a blocking finding.",
         "Local checks at that commit:", *[f"- {line}" for line in evidence_lines(task)],
         f"Post your findings as one comment: gh pr comment {task['pr']} --repo {config['github']['repo']} --body \"...\"",
         f"Then run {command('worker', 'review', me, '--verdict', 'approve', '--sha', head)} "

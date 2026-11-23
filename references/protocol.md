@@ -104,7 +104,7 @@ once on a model with capacity, or its task waits for the reset.
 
 | Worker | Command | What it does |
 |---|---|---|
-| Implementer | `worker pr --pr N` | Checks PR N and this checkout, then runs the project's checks here. A failed check refuses, with the output; on success the task goes to review. |
+| Implementer | `worker pr --pr N` | Checks PR N, its Decisions section and this checkout, then runs the project's checks here. A failed check refuses, with the output; on success the task goes to review. |
 | Implementer | `worker stuck --why "…"` | Blocks the task with a question for the user |
 | Implementer | `worker waits --on "<task>" --why "…"` | Waits for that task's code; the same implementer carries on once it merges |
 | Reviewer | `worker review --verdict approve\|changes --sha S` | `approve` posts `t3/review` on S, which must still be the PR's head. `changes` sends the task back to its implementer. |

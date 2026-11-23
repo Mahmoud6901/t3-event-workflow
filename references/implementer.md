@@ -14,7 +14,8 @@ out of commits, PRs and comments.
 3. **Check it yourself** with the project's tests and checks before you push.
 4. **Commit, push and open the PR** as your brief says: `git push -u origin HEAD`, then
    `gh pr create`. Give the PR the title in your brief, and a body that says what changed, why, and
-   how you checked it.
+   how you checked it. End it with a `## Decisions` section: each call the brief left open, what you
+   chose and why, or "None". `worker pr` refuses a PR without one.
 5. **Run `worker pr`** with the PR's number, in your checkout. If it refuses, fix what it names, commit,
    push, and run it again.
 6. **End your turn** when it succeeds. A reviewer is called next.

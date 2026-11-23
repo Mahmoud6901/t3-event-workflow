@@ -18,6 +18,8 @@ You review one pull request at one commit. Your brief gives:
    - It changes only the task's paths, and has no secrets, debug leftovers or unrelated edits.
    - After a conflict: the merge kept both sides' intent.
    - It holds no stub, fake or copy of code another open task builds, unless your brief allows it.
+   - Each decision in the PR body's Decisions section fits the brief. One that changes what the task
+     asks for, or that the user should have made, is a blocking finding.
 
    Run tests in the checkout when it helps, and leave no files behind.
 3. **Post one comment** with `gh pr comment`, as your brief shows.

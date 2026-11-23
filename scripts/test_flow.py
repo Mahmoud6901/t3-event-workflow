@@ -85,11 +85,12 @@ class FakeHub:
         self.merged = []
         self.protection = [{"context": "t3/review"}, {"context": "acceptance", "app_id": 15368}]  # main's required checks
 
-    def open(self, number, branch, files):
+    def open(self, number, branch, files, body="Fixes it.\n\n## Decisions\nNone"):
         head = git(self.origin, "rev-parse", f"refs/heads/{branch}")
+        body = self.prs[number]["body"] if number in self.prs else body  # A push keeps the PR's body.
         self.prs[number] = {"number": number, "state": "open", "merged": False, "head": head, "branch": branch,
                             "base": "main", "url": f"https://github.com/{REPO}/pull/{number}", "mergeCommit": None,
-                            "files": files}
+                            "body": body, "files": files}
 
     def pull(self, number):
         return dict(self.prs[number])
@@ -803,6 +804,34 @@ class FlowTests(unittest.TestCase):
         self.assertIn("2 failed", result["error"])
         self.assertEqual(self.orchestrator("next")["calls"], [])
 
+    def test_a_pull_request_without_a_decisions_section_is_refused_with_how_to_add_one(self):
+        self.bind()
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        brief = call["arguments"]["task"]
+        self.assertIn("and a Decisions section", brief)
+        self.assertIn("\"## Decisions\" section: each call this brief left open", brief)
+        worker, token, tree = self.implement(call, "export const name = 1;\n", 7)
+        for body in ("Renames nmae to name.", "Decisions were easy.", "## Decisions\n\n## Tests\nRan them."):
+            self.hub.prs[7]["body"] = body
+            result = self.worker("pr", worker, token, "--pr", "7", path=tree)
+            self.assertFalse(result["ok"], body)
+            self.assertIn("no Decisions section", result["error"])
+            self.assertIn("gh pr edit 7 --body-file", result["error"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
+        self.hub.prs[7]["body"] = "Renames nmae to name.\r\n\r\n**Decisions:**\r\n- Kept the old export too, for callers."
+        result = self.worker("pr", worker, token, "--pr", "7", path=tree)
+        self.assertTrue(result["ok"], result)
+        (review,) = self.start()
+        self.assertIn("Check each decision in the PR body's Decisions section", review["arguments"]["task"])
+
+    def test_a_decisions_section_reads_in_the_forms_a_pr_body_writes_it(self):
+        for body in ("## Decisions\nNone", "Decisions: None", "### decisions\n\n- Chose v2: the brief names it.",
+                     "**Decisions**\nNone"):
+            self.assertTrue(flow.has_decisions(body), body)
+        for body in ("", None, "## Decisions", "## Decisions\n## Testing\nok", "Decisions were easy."):
+            self.assertFalse(flow.has_decisions(body), body)
+
     def test_a_worker_command_with_a_wrong_token_is_refused(self):
         self.bind()
         self.queue("Fix the login typo")
@@ -1223,7 +1252,7 @@ class FlowTests(unittest.TestCase):
         git(fix_tree, "add", ".")
         git(fix_tree, "commit", "-m", "Pin Node")
         git(fix_tree, "push", "-u", "origin", "HEAD")
-        self.hub.open(9, "t3/devops", [".github/ci.yml"])
+        self.hub.open(9, "t3/devops", [".github/ci.yml"], body="Pins Node 24.")  # No Decisions: a pipeline fix needs none.
         registered = self.worker("pipeline", *devops, "--pr", "9", path=fix_tree)
         self.assertTrue(registered["ok"], registered)
         self.assertIsNone(self.worker("take", *devops)["job"])

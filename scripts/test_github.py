@@ -69,15 +69,22 @@ def pull_body(number=7, sha="head1", ref="t3/fix-login", state="open", merged=Fa
 class PullTests(unittest.TestCase):
     def test_a_pull_request_reads_its_head_commit_branch_and_every_changed_file(self):
         fake = FakeGh()
-        fake.on("GET", f"repos/{REPO}/pulls/7", pull_body())
+        fake.on("GET", f"repos/{REPO}/pulls/7", {**pull_body(), "body": "Fixes the typo.\n\n## Decisions\nNone"})
         page_one = [{"filename": f"src/f{i}.ts"} for i in range(100)]
         fake.on("GET", f"repos/{REPO}/pulls/7/files?per_page=100&page=1", page_one)
         fake.on("GET", f"repos/{REPO}/pulls/7/files?per_page=100&page=2", [{"filename": "README.md"}])
         pr = hub(fake).pull(7)
         self.assertEqual((pr["number"], pr["head"], pr["branch"], pr["base"], pr["state"]),
                          (7, "head1", "t3/fix-login", "main", "open"))
+        self.assertEqual(pr["body"], "Fixes the typo.\n\n## Decisions\nNone")
         self.assertEqual(len(pr["files"]), 101)
         self.assertEqual(pr["files"][-1], "README.md")
+
+    def test_a_pull_request_with_no_body_reads_as_an_empty_one(self):
+        fake = FakeGh()
+        fake.on("GET", f"repos/{REPO}/pulls/7", {**pull_body(), "body": None})
+        fake.on("GET", f"repos/{REPO}/pulls/7/files?per_page=100&page=1", [])
+        self.assertEqual(hub(fake).pull(7)["body"], "")
 
     def test_a_missing_pull_request_is_a_failure_with_its_status(self):
         with self.assertRaises(github.Failed) as caught:
