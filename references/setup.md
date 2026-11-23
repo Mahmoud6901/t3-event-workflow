@@ -24,7 +24,7 @@ Until the binding exists, your hook does not guard this session. Read and ask; c
   them from the project's instructions or package scripts, and give each `argv` as a list. Do not run
   them now. If none apply, write `noChecksReason` instead, saying why.
 
-## 2. Ask about models, DevOps and guarded paths
+## 2. Ask about models, DevOps, docs and guarded paths
 
 Each role has a default model and effort. The user can choose, for each role, any model their T3 runs,
 any effort it offers, both, or neither. Run `models` the way step 3 runs `init`, with the ids from
@@ -37,18 +37,19 @@ step 1:
 - If `known` is false, tell the user its `reason` and go on: no model can be picked, only efforts.
 - Otherwise tell the user which `providers` T3 can run, and why any other cannot. If none is ready,
   stop: T3 needs Claude, Codex, goose or Antigravity enabled and signed in.
-- Then, for the implementer, the reviewer and DevOps in turn, show the role's default model and
-  effort from `defaults`, and ask for a model, an effort, both, or a skip. The implementer has no
-  default model: Jev chooses one per task, and without Jev's answer it runs on its `fallback`: Opus 5.5,
-  else the best-scored approved model T3 runs. When `runs` is false, this T3 cannot run the default (for the
-  implementer, any approved model), so the user picks a model; `init` refuses that role without one.
+- Then, for the implementer, the reviewer, DevOps, the lead and the docs worker in turn, show the role's
+  default model and effort from `defaults`, and ask for a model, an effort, both, or a skip. The
+  implementer has no default model: Jev chooses one per task, and without Jev's answer it runs on its
+  `fallback`: Opus 5.5, else the best-scored approved model T3 runs. When `runs` is false, this T3 cannot
+  run the default, so the user picks a model; `init` refuses the reviewer and DevOps without one. The
+  lead and the docs worker start on another approved model T3 runs (the lead on Opus 5.5).
 - Search with the user's words and show the matches with their `provider`; `more` counts the ones not
   shown. Offer only a model the list returned.
 - Offer the efforts in the chosen model's `efforts` (none when it is empty). Without a chosen model,
   offer low, medium, high, xhigh or max.
 - A role runs on the model and effort the user chose. Jev chooses an implementer's model they skipped,
   among the models this T3 runs; without its answer, the `fallback`. Jev never sets an effort: a
-  skipped one is the default, `xhigh` for the implementer. A reviewer and DevOps run on the user's
+  skipped one is the default, `xhigh` for the implementer. The other roles run on the user's
   choice, else the default. A reviewer of the same family as the model that wrote its PR (its maker:
   Anthropic, OpenAI, Google) runs instead on the best-scored approved reviewer of another family.
 - A model runs on its first route with capacity (Opus: Claude, Antigravity, then goose). Paid goose
@@ -63,6 +64,11 @@ Then ask whether a DevOps worker merges the PRs (the default), or the harness, w
 harness, add `"devops":false` to `init`. Without DevOps, the harness brings each confirmed PR up to
 date with the branch, waits for CI and merges it. Every CI failure goes back to the implementer, which
 asks the user when CI itself is broken. DevOps also fixes the pipeline; the harness does not.
+
+Then ask whether a docs worker updates the docs when a plan's tasks finish (the default), and which
+paths it may change: by default `README.md`, `CHANGELOG.md` and `docs/`. It changes no code, and edits a
+changelog only if one exists. For other paths, add `"docs":["README.md","site/"]` to `init`; for none,
+`"docs":false`.
 
 Then ask which paths, if any, are guarded: paths no PR changes without the user's word, such as
 database migrations or deploy configuration. Write them the way a plan's `owns` does, for example
@@ -100,10 +106,11 @@ In Codex's PowerShell, pipe a here-string instead, and keep the JSON ASCII (writ
 | `requiredChecks` | The CI check names that must pass before a merge |
 | `checks` | Local checks `worker pr` runs, each `{"name","argv","cwd","timeoutSeconds"}`. Give `argv` as a list, not shell text; `cwd` is relative to the project folder. |
 | `noChecksReason` | Why there are no local checks, when `checks` is empty |
-| `defaults` | Models and efforts without the user's choice or Jev's answer: reviewer GPT-6.2 Astra at `xhigh`, DevOps Sonnet 5.5 at `high`, and the implementer's effort `xhigh`. The implementer has no default model. |
+| `defaults` | Models and efforts without the user's choice or Jev's answer: reviewer GPT-6.2 Astra at `xhigh`, DevOps Sonnet 5.5 at `high`, lead Fable 5.2 at `high`, docs worker Gemini 4 Neon at `high`, and the implementer's effort `xhigh`. The implementer has no default model. |
 | `quietMinutes` | Minutes before a quiet worker is replaced (default 30) |
 | `picks` | The user's model and effort per role, from step 2 |
 | `devops` | `false` merges without a DevOps worker (default `true`), from step 2 |
+| `docs` | `false` for no docs worker, or the paths it may change (default on, with `README.md`, `CHANGELOG.md`, `docs/`), from step 2 |
 | `guarded` | Paths whose changes wait for the user's answer before a merge (default none), from step 2 |
 
 The binding starts paused. If it says the project is already bound, point the user to its orchestrator
@@ -135,6 +142,8 @@ Tell the user:
   or go back with "use t3 workflow: back to default for the reviewer"
 - whether DevOps merges, and that "use t3 workflow: turn DevOps off" (or on) changes it for plans that
   start later
+- whether the docs worker runs and on which paths, and that "use t3 workflow: turn the docs worker off"
+  (or on, or new paths) changes it for plans that start later
 - the guarded paths, if any, and that "use t3 workflow: guard <path>" (or stop guarding it) changes
   them
 - that when GitHub cannot run CI, as when its billing stops Actions, "use t3 workflow: turn CI off"
@@ -189,4 +198,5 @@ jobs:
 - The old `<project>-tracks` folders can go once their work is merged or dropped.
 
 A binding's settings are fixed at `init`, except the models and efforts the user chooses, which `pick`
-changes, and the guarded paths, which `guarded` changes.
+changes, the guarded paths, which `guarded` changes, and DevOps, the docs worker and CI, which `devops`,
+`docs` and `ci` turn on or off.

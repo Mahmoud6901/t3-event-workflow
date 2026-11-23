@@ -33,21 +33,22 @@ PROVIDERS = {"claudeAgent": ("Claude", "effort"), "codex": ("Codex", "reasoningE
              ANTIGRAVITY: ("Antigravity", "thought_level")}
 MATCHES = 20  # Models one search shows.
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-ROLES = ("implementer", "reviewer", "devops", "lead")
-SPARE = ("lead",)  # Roles whose default may give way at setup to another approved model of the role that T3 runs.
+ROLES = ("implementer", "reviewer", "devops", "lead", "docs")
+AUTHORS = ("implementer", "docs")  # Roles that write a task's PR in their own checkout.
+SPARE = ("lead", "docs")  # Roles whose default may give way at setup to another approved model of the role that T3 runs.
 # The approved models and their roles. Only one with a card in assets/cards.json is approved: Jev reads it. A model T3
 # runs through more than one provider lists its routes in the order to try them, each with the model's id there
 # (its own by default); `provider` is its first. One card and one family serve every route. A goose route is paid
 # per token through OpenRouter; the rest are subscriptions.
 MODELS = {
-    "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer", "devops", "lead"], "routes": [
+    "claude-opus-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer", "devops", "lead", "docs"], "routes": [
         {"provider": "claudeAgent"}, {"provider": ANTIGRAVITY}, {"provider": GOOSE, "model": "anthropic/claude-opus-5.5"}]},
-    "claude-sonnet-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer", "devops"], "routes": [
+    "claude-sonnet-5-5": {"provider": "claudeAgent", "roles": ["implementer", "reviewer", "devops", "docs"], "routes": [
         {"provider": "claudeAgent"}, {"provider": ANTIGRAVITY}]},
     "gpt-6.2-astra": {"provider": "codex", "roles": ["implementer", "reviewer"], "routes": [
         {"provider": "codex"}, {"provider": GOOSE, "model": "openai/gpt-6.2-astra"}]},
     "gpt-6.2-sol": {"provider": "codex", "roles": ["implementer"]},
-    "gemini-4-neon": {"provider": ANTIGRAVITY, "roles": ["implementer", "reviewer", "devops"], "routes": [
+    "gemini-4-neon": {"provider": ANTIGRAVITY, "roles": ["implementer", "reviewer", "devops", "docs"], "routes": [
         {"provider": ANTIGRAVITY}, {"provider": GOOSE, "model": "google/gemini-4-neon"}]},
     "gemini-4-argon": {"provider": ANTIGRAVITY, "roles": ["implementer"]},
     "gemini-4-hydrogen": {"provider": ANTIGRAVITY, "roles": ["implementer"]},
@@ -60,7 +61,7 @@ MODELS = {
 }
 DEFAULTS = {"implementerEffort": "xhigh", "reviewer": "gpt-6.2-astra", "reviewerEffort": "xhigh",
             "devops": "claude-sonnet-5-5", "devopsEffort": "high",
-            "lead": "claude-fable-5-2", "leadEffort": "high"}  # No implementer model: Jev chooses it, else fallback().
+            "lead": "claude-fable-5-2", "leadEffort": "high", "docs": "gemini-4-neon", "docsEffort": "high"}  # No implementer model: Jev chooses it, else fallback().
 SHIPPED = {"reviewer": "claude-opus-5-5"}  # Defaults an earlier version shipped, which a binding it made still stores.
 QUIET_MINUTES = 30
 NUDGES = 1  # Follow-ups asking a worker that ended without its closing command to finish; then the task is blocked.
@@ -68,12 +69,13 @@ REVIEW_ROUNDS = 3  # Reviews asking for changes before the user decides how the 
 ROUND_OPTIONS = ["carry on", "restart", "drop"]
 OPEN = ("waiting", "ready", "implementing", "review_needed", "reviewing", "approved", "asking", "confirmed",
         "merging", "ci_failed", "pipeline_wait", "blocked")
-FINISHED = ("merged", "dropped")
+FINISHED = ("merged", "dropped", "unchanged")  # A docs task whose worker found nothing to update ends unchanged.
+DOCS_PATHS = ["README.md", "CHANGELOG.md", "docs/"]  # What a docs task may change, unless the user names other paths.
 # A spec waits for its lead to start, is being written, asks the user, or is blocked; then it is approved or dropped.
 SPEC_OPEN = ("waiting", "writing", "asking", "blocked")
 SPEC_OPTIONS = ["approve", "drop"]
 SPEC_CHARS = 4000  # The most a spec's text (goal, scope and questions) holds: every reviewer of its plan reads it.
-NAMES = {"devops": "DevOps worker"}  # A role's name in the user's lines, where it is not the role itself.
+NAMES = {"devops": "DevOps worker", "docs": "docs worker"}  # A role's name in the user's lines, where it is not the role itself.
 
 
 class Refused(ValueError):
@@ -237,15 +239,22 @@ def validate_config(raw):
     return config
 
 
-def guarded_paths(raw):
+def guarded_paths(raw, name="guarded"):
     """The guarded paths the user gave, in a plan's `owns` form: a PR that changes a file under one waits for the user's
-    answer before it merges. [] for none."""
+    answer before it merges. [] for none. The docs worker's paths take the same form (`name` "docs")."""
     require(isinstance(raw, list) and all(isinstance(p, str) and p.strip() for p in raw),
-            "guarded lists paths in the project, like a plan's owns; [] for none")
+            f"{name} lists paths in the project, like a plan's owns" + ("; [] for none" if name == "guarded" else ""))
     paths = [slash(p.strip()) for p in raw]
     require(all(not p.startswith("/") and not re.match(r"[A-Za-z]:", p) and ".." not in p.split("/") for p in paths),
-            "A guarded path is inside the project, relative to its root")
+            f"A {name} path is inside the project, relative to its root")
     return list(dict.fromkeys(paths))
+
+
+def docs_paths(raw):
+    """The paths a docs task may change, as the user gave them: at least one."""
+    paths = guarded_paths(raw, "docs")
+    require(paths, "docs lists at least one path; false turns the docs worker off")
+    return paths
 
 
 def listed(files, most=10):
@@ -419,6 +428,19 @@ def devops_on(state, name):
     """A plan keeps the DevOps mode it started with; one not started yet follows the binding's current mode."""
     plan = state["plans"][name]
     return plan.get("devops", True) if plan["started"] else state.get("devopsOn", True)
+
+
+def docs_on(state, name):
+    """Whether a plan gets a docs task when its tasks finish. A plan keeps the mode it started with, and one an earlier
+    version started gets none; one not started yet follows the binding's current mode."""
+    plan = state["plans"][name]
+    return plan.get("docs", False) if plan["started"] else state.get("docsOn", True)
+
+
+def maker(task):
+    """The role of the worker that writes a task's PR: a docs task's docs worker, else an implementer. Both hold the
+    task under its "implementer" key."""
+    return "docs" if task.get("kind") == "docs" else "implementer"
 
 
 def ci_checks(config, state):
@@ -687,7 +709,7 @@ class Flow:
         handler = {"control": self.control, "queue_set": self.queue_set, "next": self.next, "done": self.done,
                    "status": self.status, "answer": self.answer, "ended": self.ended, "restart": self.restart,
                    "queue_edit": self.queue_edit, "setup_github": self.setup_github, "pick": self.pick,
-                   "devops": self.devops, "ci": self.ci, "guarded": self.guarded, "spec": self.spec}.get(op)
+                   "devops": self.devops, "ci": self.ci, "guarded": self.guarded, "spec": self.spec, "docs": self.docs}.get(op)
         require(handler, f"Unknown operation {op}")
         return handler(project, req)
 
@@ -703,16 +725,21 @@ class Flow:
         devops = req.get("devops", True)
         require(isinstance(devops, bool), "devops is true (a DevOps worker merges) or false (the harness merges)")
         guarded = guarded_paths(req.get("guarded") or [])
+        docs = req.get("docs", True)
+        require(isinstance(docs, (bool, list)), "docs is false (no docs worker), true, or the paths the docs worker may "
+                                                "change")
         lists, why = t3_lists()
         state = new_state()
         state["guarded"] = guarded
+        state["docsOn"] = docs is not False
+        state["docsPaths"] = docs_paths(docs) if isinstance(docs, list) else list(DOCS_PATHS)
         state["picks"] = {role: pick for role, raw in picks.items()
                           if (pick := settle_pick(role, {}, raw, config["defaults"], lists))}
         state["devopsOn"] = devops
         if lists is not None:  # Every role must start on something this T3 runs, and Jev advises only among those.
             models = {**config, "models": approved()}
             for role in ROLES:
-                if state["picks"].get(role, {}).get("model"):
+                if state["picks"].get(role, {}).get("model") or (role == "docs" and not state["docsOn"]):
                     continue
                 model = config["defaults"].get(role)
                 if model and role not in SPARE:
@@ -790,6 +817,26 @@ class Flow:
                           if plan["started"] and plan["status"] != "done" and plan.get("devops", True) != on)
             return {"devops": on, "keep": keep}
         return self.transact(project, change, "devops")
+
+    def docs(self, project, req):
+        """The user turns the docs worker on or off for plans that start from now on, or changes the paths a new docs
+        task may change; running plans keep the mode they started with."""
+        on, raw = req.get("on"), req.get("paths")
+        require(on is not None or raw is not None, "Give on, paths or both")
+        require(on is None or isinstance(on, bool), "on is true or false")
+        paths = docs_paths(raw) if raw is not None else None
+        text(req.get("authorization"), "authorization (the user's own words)")
+
+        def change(config, state):
+            if on is not None:
+                state["docsOn"] = on
+            if paths is not None:
+                state["docsPaths"] = paths
+            now_on = state.get("docsOn", True)
+            keep = sorted(name for name, plan in state["plans"].items()
+                          if plan["started"] and plan["status"] != "done" and plan.get("docs", False) != now_on)
+            return {"docs": now_on, "paths": state.get("docsPaths") or list(DOCS_PATHS), "keep": keep}
+        return self.transact(project, change, "docs")
 
     def guarded(self, project, req):
         """The user's new list of guarded paths, replacing the old one; [] guards none. It applies to every approval from
@@ -1071,7 +1118,7 @@ class Flow:
             elif self.quiet_due(worker) and self.quiet_act(state, worker, self.owing(state, worker)) == "replace":
                 task = self.owing(state, worker)
                 back.add((worker["role"], task and task["id"]))
-        ready |= {task_id for role, task_id in back if role == "implementer"}
+        ready |= {task_id for role, task_id in back if role in AUTHORS}
         leads = sorted({name for name, spec in (state.get("specs") or {}).items() if spec["state"] == "waiting"}
                        | {name for role, name in back if role == "lead"})
         if state["control"] == "active":
@@ -1093,8 +1140,9 @@ class Flow:
             if ready or reviews or merges or leads:
                 lists, spent = t3_lists()[0], limits_now(state)
                 waits = {role: out_until(config, state, role, spent, lists) for role in ROLES}
-                for role, task_ids in (("implementer", sorted(ready)), ("reviewer", reviews)):
-                    for task_id in task_ids if not waits[role] else ():
+                for role, task_id in [*((maker(state["tasks"][t]), t) for t in sorted(ready)),
+                                      *(("reviewer", t) for t in reviews)]:
+                    if not waits[role]:
                         choices[role, task_id] = self.advise(config, state, role, described(state["tasks"][task_id]),
                                                              lists, spent)
                 for name in leads if not waits["lead"] else ():
@@ -1110,7 +1158,7 @@ class Flow:
                 """No model the role could run on has capacity until a quota resets: the work waits, told once."""
                 until = waits.get(role)
                 if until and item.get("held") != until:
-                    state["tell"].append(f"{label} waits until {until}: every model its {role} could run on is at its "
+                    state["tell"].append(f"{label} waits until {until}: every model its {NAMES.get(role, role)} could run on is at its "
                                          "usage limit. It starts by itself then.")
                 if until:
                     item["held"] = until
@@ -1135,8 +1183,8 @@ class Flow:
                     if task["state"] == "waiting" and self.unblocked(state, task) and self.parked(state, task):
                         self.resume(config, state, task)
                     elif task["state"] == "waiting" and self.unblocked(state, task):
-                        if not held(task, "implementer", label):
-                            self.start_implementer(config, state, task, choices.get(("implementer", task["id"])))
+                        if not held(task, maker(task), label):
+                            self.start_implementer(config, state, task, choices.get((maker(task), task["id"])))
                     elif task["state"] == "review_needed":
                         if not held(task, "reviewer", label):
                             self.start_reviewer(config, state, task, choices.get(("reviewer", task["id"])))
@@ -1230,7 +1278,7 @@ class Flow:
 
         def role_of(task):
             where = task.get("blockedFrom") if task["state"] == "blocked" else task["state"]
-            return {"implementing": "implementer", "reviewing": "reviewer", "merging": "devops"}.get(where)
+            return {"implementing": maker(task), "reviewing": "reviewer", "merging": "devops"}.get(where)
 
         config, state = self.load(project)
         task = state["tasks"][self.task_id(state, name)]
@@ -1238,7 +1286,7 @@ class Flow:
         advice, spent = {}, limits_now(state)
         # With a limit spent the new worker may need a stand-in; a stand-in, or a choice a limit narrowed, is advised afresh.
         stale = kept.get("limit") or kept.get("narrowed")
-        if (spent or stale) and role_of(task) in ("implementer", "reviewer"):
+        if (spent or stale) and role_of(task) in (*AUTHORS, "reviewer"):
             advice = self.advise(config, state, role_of(task), described(task), t3_lists()[0], spent)
         kept = {} if stale else kept
 
@@ -1246,7 +1294,7 @@ class Flow:
             task = state["tasks"][self.task_id(state, name)]
             role = role_of(task)
             require(role, f"{task['id']} is {task['state']}; no worker of it can be restarted")
-            old = state["workers"].get(task.get("blockedWorker") or task.get(role))
+            old = state["workers"].get(task.get("blockedWorker") or task.get("implementer" if role in AUTHORS else role))
             if old:
                 self.retire(state, old, "restarted on the user's word")
             uncount(task, role)  # The user's restart starts the count of quiet replacements again.
@@ -1255,7 +1303,7 @@ class Flow:
             for ask in state["asks"].values():
                 if ask["task"] == task["id"] and not ask.get("answered"):
                     ask["answered"] = "restarted"
-            if role == "implementer":
+            if role in AUTHORS:
                 self.start_implementer(config, state, task, advice or kept)
             elif role == "reviewer":
                 self.start_reviewer(config, state, task, advice)
@@ -1316,9 +1364,8 @@ class Flow:
             return spec if spec and spec.get("lead") == worker["id"] and spec["state"] == "writing" and not spec.get("fix") \
                 else None
         task = state["tasks"].get(worker["task"])
-        owes = {"implementer": "implementing", "reviewer": "reviewing"}[worker["role"]]
-        return task if task and task.get(worker["role"]) == worker["id"] and task["state"] == owes and not task.get("fix") \
-            else None
+        slot, owes = ("reviewer", "reviewing") if worker["role"] == "reviewer" else ("implementer", "implementing")
+        return task if task and task.get(slot) == worker["id"] and task["state"] == owes and not task.get("fix") else None
 
     def settle(self, state, worker, waits=None):
         """A worker's run ended. One that owes nothing rests (an idle DevOps waits for a follow-up). One that owes its
@@ -1356,7 +1403,7 @@ class Flow:
         until, role = worker["ended"]["quota"], worker["role"]
         self.retire(state, worker, f"{worker['model']} is at its usage limit")
         stopped(task, worker, "quota")
-        why = f"its {role} stopped at {worker['model']}'s usage limit"
+        why = f"its {NAMES.get(role, role) if role == 'docs' else role} stopped at {worker['model']}'s usage limit"
         if role == "devops":
             self.devops_back(state, worker["plan"], task, why)
         else:
@@ -1453,27 +1500,28 @@ class Flow:
         """A new implementer takes the task after its review rounds, told why its PR came back. The author of a
         pipeline fix is its plan's DevOps worker, which stays."""
         old = state["workers"].get(task.get("implementer"))
-        if old and old["role"] == "implementer":
+        if old and old["role"] in AUTHORS:
             self.retire(state, old, "replaced after its review rounds")
         task.pop("fix", None)
         task["returned"] = (f"The reviewer asked for changes on PR #{task['pr']} {REVIEW_ROUNDS} times, and the user gave "
-                            f"the task to a new implementer.")
+                            f"the task to a new {NAMES.get(maker(task), maker(task))}.")
         self.start_implementer(config, state, task, advice)
 
     def other_model(self, config, state, task):
-        """Advice for the new implementer that takes a task after its review rounds. Where the user left the model
-        open, it runs on another model than the one that held the task: Jev's choice among the other options, else the
-        fallback, or the best scored of them when the fallback held it. With the user's model, or no other to run on, the
-        usual advice."""
+        """Advice for the new implementer (or docs worker) that takes a task after its review rounds. Where the user left
+        the model open, it runs on another model than the one that held the task: Jev's choice among the other options,
+        else the fallback, or the best scored of them when the fallback held it. With the user's model, or no other to run
+        on, the usual advice."""
+        role = maker(task)
         lists, spent = t3_lists()[0], limits_now(state)
         last = (state["workers"].get(task.get("implementer")) or {}).get("model")
-        others = {m: route for m, route in options(config, "implementer", lists, spent).items() if m != last}
-        if ((state.get("picks") or {}).get("implementer") or {}).get("model") or not others:
-            return self.advise(config, state, "implementer", described(task), lists, spent)
-        choice = self.ask_jev(config, state, "implementer", described(task), others)
+        others = {m: route for m, route in options(config, role, lists, spent).items() if m != last}
+        if ((state.get("picks") or {}).get(role) or {}).get("model") or not others:
+            return self.advise(config, state, role, described(task), lists, spent)
+        choice = self.ask_jev(config, state, role, described(task), others)
         if not choice:
             model, source = fallback(others)
-            choice = {"implementer": model, "source": source}
+            choice = {role: model, "source": source}
         return choice
 
     def drop(self, state, task, note):
@@ -1584,6 +1632,7 @@ class Flow:
                           for s in (state.get("specs") or {}).values()],
                 "working": sorted(w["id"] for w in state["workers"].values() if w["state"] == "working"),
                 "models": {role: role_model(config, state, role) for role in ROLES}, "devops": state.get("devopsOn", True),
+                "docs": {"on": state.get("docsOn", True), "paths": state.get("docsPaths") or list(DOCS_PATHS)},
                 "ci": state.get("ciOn", True), "guarded": state.get("guarded") or [], "pendingCalls": len(state["calls"]), "openAsks": [a for a in state["asks"].values() if not a.get("answered")],
                 "problems": health.problems(self.path.parent, scanning=watcher.running(self.path.parent))}
 
@@ -1666,7 +1715,7 @@ class Flow:
             worker.update({k: v for k, v in placed(config, model, route, effort, lists).items() if v})
         if standing:
             worker["standsInFor"] = standing
-            line = (f"{standing} is at its usage limit, so a new {'DevOps' if role == 'devops' else role} runs on "
+            line = (f"{standing} is at its usage limit, so a new {'DevOps' if role == 'devops' else NAMES.get(role, role)} runs on "
                     f"{model} until it resets.")
             if line not in state["tell"]:
                 state["tell"].append(line)
@@ -1714,11 +1763,11 @@ class Flow:
     def start_implementer(self, config, state, task, choice):
         plan = state["plans"][task["plan"]]
         if not plan["started"]:
-            plan["started"], plan["devops"] = True, state.get("devopsOn", True)
+            plan["started"], plan["devops"], plan["docs"] = True, state.get("devopsOn", True), state.get("docsOn", True)
             count = sum(1 for t in state["tasks"].values() if t["plan"] == plan["plan"])
             state["tell"].append(f"Plan {plan['plan']} started: {count} task{'s' if count != 1 else ''}.")
         task["choice"] = choice or {}
-        worker = self.add_worker(config, state, "implementer", task["plan"], task["id"], choice)
+        worker = self.add_worker(config, state, maker(task), task["plan"], task["id"], choice)
         worker["job"] = {"kind": "implement", "reported": False, "nudged": 0}
         task["implementer"] = worker["id"]
         self.move(task, "implementing")
@@ -1756,7 +1805,7 @@ class Flow:
         effort = effort if effort in EFFORTS else config["defaults"]["reviewerEffort"]  # Not a level only one model has.
         worker.update({k: v for k, v in placed(config, best, others[best], effort, lists).items() if v})
         worker.update(modelSource="family", otherThan=author["model"],
-                      otherRole="DevOps worker" if author["role"] == "devops" else "implementer")
+                      otherRole=NAMES.get(author["role"], author["role"]))
 
     def confirm(self, state, task, pr, checks):
         """The orchestrator's rule: the reviewed commit is the head, CI has not failed, only the task's paths changed, and
@@ -1851,8 +1900,10 @@ class Flow:
         project, worker = self.find_worker(args["worker"], args["token"])
         handler = {"pr": self.pr, "stuck": self.stuck, "waits": self.waits, "review": self.review, "take": self.take,
                    "update": self.update, "merge": self.merge, "failed": self.failed, "pipeline": self.pipeline,
-                   "submit": self.submit}.get(command)
+                   "submit": self.submit, "unchanged": self.unchanged}.get(command)
         require(handler, f"{command} is not available yet")
+        if command == "unchanged":
+            require(worker["role"] == "docs", "Only a docs worker runs unchanged")
         if command in {"take", "update", "merge", "failed", "pipeline"}:
             require(worker["role"] == "devops", f"Only DevOps runs {command}")
         if command == "submit":
@@ -1957,11 +2008,28 @@ class Flow:
             self.reported(state, worker, task)
             ask_id = next_id(state, "a")
             state["asks"][ask_id] = {"id": ask_id, "task": task["id"], "kind": "stuck", "options": None,
-                                     "question": f"The implementer of {task['task']} ({task['plan']}) asks: {why}"}
+                                     "question": f"The {NAMES.get(worker['role'], worker['role'])} of {task['task']} "
+                                                 f"({task['plan']}) asks: {why}"}
             task["blockedFrom"] = "implementing"
-            self.move(task, "blocked", "the implementer is stuck")
+            self.move(task, "blocked", f"the {NAMES.get(worker['role'], worker['role'])} is stuck")
             return {"state": "blocked", "next": "Your question goes to the user; the answer comes as a follow-up. End your turn."}
         return self.transact(project, change, "stuck")
+
+    def unchanged(self, project, worker, args):
+        """The docs worker found nothing to update: its task ends with no PR, and its plan may finish."""
+        why = text(args.get("why"), "--why (why nothing needs updating)")
+
+        def change(config, state):
+            task = state["tasks"].get(worker["task"])
+            require(task and task.get("implementer") == worker["id"] and task["state"] == "implementing",
+                    "This task is not waiting on you")
+            require(not task.get("pr"), f"PR #{task.get('pr')} already holds this task's work: run worker pr")
+            self.reported(state, worker, task)
+            self.move(task, "unchanged", why)
+            state["tell"].append(f"The docs of plan {task['plan']} needed no update: {why}")
+            self.finish_plan(state, task["plan"])
+            return {"state": "unchanged", "next": "End your turn."}
+        return self.transact(project, change, "unchanged")
 
     def waits(self, project, worker, args):
         """The implementer needs code another open task is still building. Its task waits for that task again, and the
@@ -2490,10 +2558,32 @@ class Flow:
         tasks = [t for t in state["tasks"].values() if t["plan"] == name]
         if plan["status"] == "done" or any(t["state"] not in FINISHED for t in tasks):
             return
+        if self.add_docs(state, name):
+            return
         plan["status"] = "done"
         merged = sum(1 for t in tasks if t["state"] == "merged")
-        dropped = len(tasks) - merged
+        dropped = sum(1 for t in tasks if t["state"] == "dropped")
         state["tell"].append(f"Plan {name} done: {merged} merged{f', {dropped} dropped' if dropped else ''}.")
+
+    def add_docs(self, state, name):
+        """With docs on for the plan, one docs task for its merged tasks that no docs task covered yet. A pipeline fix
+        and a docs task's own PR are not such tasks. Returns whether it added one."""
+        if not docs_on(state, name):
+            return False
+        tasks = [t for t in state["tasks"].values() if t["plan"] == name]
+        covered = {c for t in tasks if t.get("kind") == "docs" for c in t.get("covers") or []}
+        fresh = [t for t in tasks if t.get("kind", "task") == "task" and t["state"] == "merged" and t["id"] not in covered]
+        if not fresh:
+            return False
+        count = sum(1 for t in tasks if t.get("kind") == "docs") + 1
+        task_id = next_id(state, "t")
+        prs = "; ".join(f"#{t.get('pr')} {t['task']}" for t in fresh)
+        state["tasks"][task_id] = {
+            "id": task_id, "plan": name, "task": f"Update the docs of {name}" + (f" ({count})" if count > 1 else ""),
+            "brief": f"Bring the docs up to date with the merged PRs of plan {name}: {prs}.",
+            "owns": list(state.get("docsPaths") or DOCS_PATHS), "after": [], "kind": "docs",
+            "covers": [t["id"] for t in fresh], "state": "waiting", "rev": 0, "history": []}
+        return True
 
     def stop_summary(self, state):
         """Once per stop of an active binding: when nothing can move without the user (no worker working or about to
@@ -2620,11 +2710,22 @@ def implementer_brief(config, state, task, worker):
                  f"When the work is done: commit, git push -u origin HEAD, then gh pr create --base {branch} "
                  f"--title \"{task['plan']}: {task['task']}\" with a body saying what changed, why, and how you checked it, "
                  f"and a Decisions section.")
+    spec = state["plans"][task["plan"]].get("spec")
+    if task.get("kind") == "docs":
+        about = [f"You are the docs worker of plan {task['plan']} in the t3 workflow. First read "
+                 f"{slash(ROOT / 'references' / 'docs.md')}.",
+                 f"Task: {task['task']}.", f"Brief: {task['brief']}",
+                 *([f"The plan's spec:\n{spec['text']}"] if spec else []),
+                 "Change no code, and create no changelog: update one only if it already exists.",
+                 f"If nothing needs updating, run {command('worker', 'unchanged', me, '--why', WHY_UNCHANGED)} instead "
+                 "of opening a PR, and end your turn."]
+    else:
+        about = [f"You are the implementer of one task in the t3 workflow. First read "
+                 f"{slash(ROOT / 'references' / 'implementer.md')}.",
+                 f"Plan: {task['plan']}. Task: {task['task']}.", f"Brief: {task['brief'] or task['task']}",
+                 *([f"The plan's goal: {spec['goal']}"] if spec else [])]
     return "\n".join([
-        f"You are the implementer of one task in the t3 workflow. First read {slash(ROOT / 'references' / 'implementer.md')}.",
-        f"Plan: {task['plan']}. Task: {task['task']}.",
-        f"Brief: {task['brief'] or task['task']}",
-        *([f"The plan's goal: {spec['goal']}"] if (spec := state["plans"][task["plan"]].get("spec")) else []),
+        *about,
         f"Paths you may change: {', '.join(task['owns'])}.",
         *unlinked_lines(task, implementer=True),
         start[0],
@@ -2635,12 +2736,13 @@ def implementer_brief(config, state, task, worker):
         f"Then run: {command('worker', 'pr', me, '--pr', str(task['pr']) if task.get('pr') else '<number>')}",
         "It runs the project's checks in this folder. If it refuses, fix what it names, push, and run it again. "
         "When it succeeds, end your turn.",
-        *filter(None, [waits_line(state, task, me)]),
+        *filter(None, [task.get("kind") != "docs" and waits_line(state, task, me)]),
         f"If you cannot go on for another reason, run {command('worker', 'stuck', me, '--why', QUESTION)} and end your turn.",
     ])
 
 
 QUESTION = '"<your question>"'
+WHY_UNCHANGED = '"<why the docs already match>"'
 
 
 def worker_label(state, worker):
@@ -2663,9 +2765,10 @@ def started_line(state, worker):
     """The user's line for a worker whose start T3 confirmed: its role, its task, its model (and its route when it is
     not the model's first) and effort, and why that model. A stand-in names only the model it stands in for: the
     usage-limit line already said the rest. A paid route says so, unless the user picked the model."""
-    role = {"implementer": "Implementer", "reviewer": "Reviewer", "devops": "DevOps", "lead": "Lead"}[worker["role"]]
+    role = {"implementer": "Implementer", "reviewer": "Reviewer", "devops": "DevOps", "lead": "Lead",
+            "docs": "Docs worker"}[worker["role"]]
     task = state["tasks"].get(worker.get("task"))
-    what = f"{task['task']} ({task['plan']})" if task else f"plan {worker['plan']}"
+    what = f"{task['task']} ({task['plan']})" if task and worker["role"] != "docs" else f"plan {worker['plan']}"
     why = WHY_MODEL.get(worker.get("modelSource"))
     if worker.get("modelSource") == "limit":
         why = f"a stand-in for {worker.get('standsInFor') or 'a model at its usage limit'}"
@@ -2689,6 +2792,10 @@ def closing(worker, task):
         return command("worker", "review", me, "--verdict", "approve|changes", "--sha", task["head"])
     if worker["role"] == "lead":
         return command("worker", "submit", me, "--file", SPEC_FILE)
+    if worker["role"] == "docs":
+        return (command("worker", "pr", me, "--pr", str(task["pr"]) if task.get("pr") else "<number>")
+                + f" (or, if nothing needs updating: {command('worker', 'unchanged', me, '--why', WHY_UNCHANGED)}; "
+                  f"if you cannot go on: {command('worker', 'stuck', me, '--why', QUESTION)})")
     return (f"{command('worker', 'merge', me)} once CI passes on PR #{task['pr']}, or "
             f"{command('worker', 'failed', me, '--cause', 'task|pipeline', '--detail', QUESTION.replace('question', 'what failed'))}")
 

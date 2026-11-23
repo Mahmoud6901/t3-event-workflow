@@ -219,6 +219,7 @@ class FlowTests(unittest.TestCase):
         return self.call({"op": op, "projectId": PROJECT, "threadId": ORCH, **fields})
 
     def bind(self, checks=None, **fields):
+        fields.setdefault("docs", False)  # A plan ends with its own tasks here; the docs worker's tests turn it on.
         result = self.orchestrator("init", workspace=str(self.workspace), repo=REPO, requiredChecks=["acceptance"],
                                    checks=checks or [], noChecksReason=None if checks else "Test project", **fields)
         self.assertTrue(result["ok"], result)
@@ -2393,6 +2394,122 @@ class FlowTests(unittest.TestCase):
             db.close()
         self.assertEqual(self.status()["models"]["lead"], {"model": "claude-fable-5-2", "modelSource": "default",
                                                            "effort": "high", "effortSource": "default"})
+
+    # The docs worker: once a plan's tasks finish, one docs task brings its docs up to date.
+
+    def to_docs(self, **binding):
+        """Plan M30's one task merged, by the harness and with CI off, while the docs worker is on. Returns next's calls
+        after the merge."""
+        _, review, tree = self.to_review(devops=False, docs=binding.pop("docs", True), **binding)
+        self.assertTrue(self.orchestrator("ci", on=False, authorization="Turn CI off.")["ok"])
+        self.approve(review, tree)
+        self.start()
+        return self.start()
+
+    def edited_state(self, change):
+        """The binding's state, changed as an earlier version would have left it."""
+        db = store.connect(self.db)
+        try:
+            with db:
+                state = json.loads(db.execute("SELECT state FROM projects WHERE id=?", (PROJECT,)).fetchone()[0])
+                change(state)
+                db.execute("UPDATE projects SET state=? WHERE id=?", (store.packed(state), PROJECT))
+        finally:
+            db.close()
+
+    def test_a_plan_whose_work_merged_gets_a_docs_task_on_neon_and_is_done_only_after_it(self):
+        (docs,) = self.to_docs()
+        self.assertEqual(self.hub.merged, [7])
+        self.assertIn("Merged PR #7: Fix the login typo (M30).", self.last_step["tell"])
+        self.assertFalse([line for line in self.last_step["tell"] if line.startswith("Plan M30 done")])
+        self.assertEqual(self.last_done["tell"], ["Docs worker for plan M30 started on gemini-4-neon at high (the default)."])
+        arguments = docs["arguments"]
+        self.assertEqual((arguments["role"], arguments["isolation"]), ("implementation", "worktree"))
+        brief = arguments["task"]
+        for words in ("docs.md", "Task: Update the docs of M30.", "#7 Fix the login typo",
+                      "Paths you may change: README.md, CHANGELOG.md, docs/.", "create no changelog",
+                      "worker unchanged --worker", "worker pr --worker"):
+            self.assertIn(words, brief)
+        self.assertNotIn("worker waits", brief)
+        worker, token = worker_command(docs)
+        self.assertFalse(self.worker("unchanged", worker, token)["ok"], "it says why")
+        ended = self.worker("unchanged", worker, token, "--why", "The README does not describe the login form.")
+        self.assertEqual((ended["ok"], ended["state"]), (True, "unchanged"))
+        self.end(docs)
+        step = self.orchestrator("next")
+        self.assertEqual(step["calls"], [])
+        self.assertIn("The docs of plan M30 needed no update: The README does not describe the login form.", step["tell"])
+        self.assertIn("Plan M30 done: 1 merged.", step["tell"])
+        self.assertEqual([(t["task"], t["state"]) for t in self.status()["tasks"]],
+                         [("Fix the login typo", "merged"), ("Update the docs of M30", "unchanged")])
+
+    def test_a_docs_pr_merges_like_a_task_and_later_work_on_the_plan_gets_its_own_docs_task(self):
+        (docs,) = self.to_docs()
+        worker, token, tree = self.work(docs, {"README.md": "# App\nUsers sign in by name.\n"})
+        self.hub.open(8, f"t3/{worker}", ["README.md"])
+        self.assertFalse(self.worker("waits", worker, token, "--on", "Fix the login typo", "--why", "README.md")["ok"],
+                         "only an implementer waits")
+        self.assertTrue(self.worker("pr", worker, token, "--pr", "8", path=tree)["ok"])
+        (review,) = self.start()
+        self.assertFalse(self.worker("unchanged", worker, token, "--why", "Nothing.")["ok"], "its PR is in review")
+        self.approve(review, tree)
+        self.start()
+        self.assertEqual(self.start(), [], "no second docs task: the docs task's own PR needs none")
+        self.assertEqual(self.hub.merged, [7, 8])
+        self.assertIn("Plan M30 done: 2 merged.", self.last_step["tell"])
+        self.assertEqual(record.lines(self.db.parent / "record.sqlite3", "docs"),
+                         {"gemini-4-neon": "small: 1 task, 1 approved first time, 0.0 review rounds on average"})
+        self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
+        (call,) = self.start()
+        w, t, tree = self.implement(call, "export const footer = 1;\n", 9)
+        self.assertTrue(self.worker("pr", w, t, "--pr", "9", path=tree)["ok"])
+        (review,) = self.start()
+        self.approve(review, tree)
+        self.start()
+        (again,) = self.start()
+        self.assertIn("Task: Update the docs of M30 (2).", again["arguments"]["task"])
+        self.assertIn("#9 Add a footer", again["arguments"]["task"])
+        self.assertNotIn("#7", again["arguments"]["task"], "only the work no docs task covered")
+
+    def test_a_plan_whose_only_merged_work_is_a_pipeline_fix_gets_no_docs_task(self):
+        self.bind(docs=True)
+        engine = flow.Flow(self.db, hub=lambda repo: self.hub, jev=self.advise)
+        try:
+            state = flow.new_state()
+            state["plans"]["M30"] = {"plan": "M30", "owns": ["src/"], "dependsOn": [], "status": "open", "started": True,
+                                     "docs": True}
+            for task_id, kind, end in (("t1", "task", "dropped"), ("t2", "pipeline", "merged")):
+                state["tasks"][task_id] = {"id": task_id, "plan": "M30", "task": task_id, "kind": kind, "state": end}
+            engine.finish_plan(state, "M30")
+            self.assertEqual((sorted(state["tasks"]), state["plans"]["M30"]["status"]), (["t1", "t2"], "done"))
+            self.assertEqual(state["tell"], ["Plan M30 done: 1 merged, 1 dropped."])
+        finally:
+            engine.close()
+
+    def test_the_docs_worker_turns_off_or_takes_other_paths_on_your_words_for_plans_that_start_later(self):
+        refused = self.orchestrator("init", workspace=str(self.workspace), repo=REPO, requiredChecks=["acceptance"],
+                                    checks=[], noChecksReason="Test project", docs="yes")
+        self.assertFalse(refused["ok"])
+        self.bind(docs=["README.md", "site/"])
+        self.assertEqual(self.status()["docs"], {"on": True, "paths": ["README.md", "site/"]})
+        self.queue("Fix the login typo")
+        self.start()
+        self.assertFalse(self.orchestrator("docs", on=False)["ok"], "it needs your own words")
+        self.assertFalse(self.orchestrator("docs", paths=[], authorization="No paths.")["ok"])
+        off = self.orchestrator("docs", on=False, paths=["README.md"], authorization="Turn the docs worker off.")
+        self.assertTrue(off["ok"], off)
+        self.assertEqual((off["docs"], off["paths"], off["keep"]), (False, ["README.md"], ["M30"]))
+        self.assertEqual(self.status()["docs"], {"on": False, "paths": ["README.md"]})
+
+    def test_a_binding_an_earlier_version_made_has_docs_on_but_its_running_plans_get_no_docs_task(self):
+        _, review, tree = self.to_review(devops=False, docs=True)
+        self.assertTrue(self.orchestrator("ci", on=False, authorization="Turn CI off.")["ok"])
+        self.edited_state(lambda state: [state.pop("docsOn"), state.pop("docsPaths"), state["plans"]["M30"].pop("docs")])
+        self.assertEqual(self.status()["docs"], {"on": True, "paths": ["README.md", "CHANGELOG.md", "docs/"]})
+        self.approve(review, tree)
+        self.start()
+        self.assertEqual(self.start(), [])
+        self.assertIn("Plan M30 done: 1 merged.", self.last_step["tell"])
 
 
 class QuotaTests(unittest.TestCase):

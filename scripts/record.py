@@ -77,7 +77,7 @@ def phrase(bucket, n, role):
     parts = []
     if n["tasks"]:
         parts.append(f"{n['tasks']} task{'s' if n['tasks'] != 1 else ''}")
-        if role in ("implementer", "devops"):
+        if role in ("implementer", "devops", "docs"):
             parts += [f"{n['first_approved']} approved first time", f"{n['rounds'] / n['tasks']:.1f} review rounds on average"]
         else:
             parts.append(f"{n['rounds'] / n['tasks']:.1f} change requests on average")

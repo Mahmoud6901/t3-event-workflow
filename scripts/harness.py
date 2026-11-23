@@ -77,7 +77,7 @@ def parser():
     sub = top.add_subparsers(dest="mode")
     worker = sub.add_parser("worker")
     worker.add_argument("command", choices=["pr", "stuck", "waits", "review", "take", "update", "merge", "failed",
-                                            "pipeline", "submit"])
+                                            "pipeline", "submit", "unchanged"])
     worker.add_argument("--worker", required=True)
     worker.add_argument("--token", required=True)
     worker.add_argument("--pr", type=int)

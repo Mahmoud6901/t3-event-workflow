@@ -27,7 +27,9 @@
     "devops": "claude-sonnet-5-5",
     "devopsEffort": "high",
     "lead": "claude-fable-5-2",
-    "leadEffort": "high"
+    "leadEffort": "high",
+    "docs": "gemini-4-neon",
+    "docsEffort": "high"
   },
   "jev": {
     "model": "jev-1.13.0",

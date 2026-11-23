@@ -22,6 +22,7 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
 | models | `{"op":"models","search":"qwen"}` | `providers`, `defaults` (each with `runs`), `models` (each with `provider`, `efforts`) |
 | pick | `{"op":"pick","role":"reviewer","model":"…","effort":"xhigh","authorization":"<the user's words>"}` | `model`, `effort`, each with its source |
 | devops | `{"op":"devops","on":false,"authorization":"<the user's words>"}` | `devops`, `keep` |
+| docs | `{"op":"docs","on":false,"authorization":"<the user's words>"}` | `docs`, `paths`, `keep` |
 | ci | `{"op":"ci","on":false,"authorization":"<the user's words>"}` | `ci`, `changed`, `freed` |
 | guarded | `{"op":"guarded","paths":["db/migrations/"],"authorization":"<the user's words>"}` | `guarded` |
 
@@ -63,6 +64,8 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
 - **devops** turns DevOps on or off for plans that start later; `keep` lists running plans that stay as
   they are. Off, `next` merges each confirmed PR itself, one at a time, with DevOps's update and merge
   checks; the watcher wakes you when CI finishes. Every CI failure goes to the implementer.
+- **docs** sets the docs worker `on` and its `paths` for plans that start later. A finished plan with
+  merged work gets a docs task, and is done after it.
 - **ci** off, as when GitHub billing stops Actions: PRs merge on local checks and review, the branch
   requires only `t3/review`, and `freed` tasks go on. On puts back what it removed.
 - **guarded** replaces the guarded paths, written as in `owns`; `[]` for none.
@@ -84,7 +87,7 @@ The hook runs `ended` for each "Delegated task …" notice; you never do.
 | `merging` | DevOps holds it (or `next`, without DevOps) | `worker merge`, `worker failed`, `worker update` |
 | `pipeline_wait` | Waits for DevOps's pipeline fix to merge | That fix's merge |
 | `blocked` | A question for the user, or its worker ended twice without reporting or went quiet twice | `answer`, `restart`, or a drop |
-| `merged`, `dropped` | Finished | |
+| `merged`, `dropped`, `unchanged` | Finished | |
 
 **The confirmation rule**, which `next` applies to each approved task:
 - If the PR's head is not the reviewed commit, the task goes back to its implementer.
@@ -121,6 +124,7 @@ quiet before that work reports, the task is `blocked`.
 | DevOps | `worker merge` | Squash-merges the approved head once its required checks and `t3/review` are green, then fast-forwards the project folder when it is on the branch. |
 | DevOps | `worker failed --cause task\|pipeline --detail "…"` | `task` sends the failure to the implementer. `pipeline` holds the task until DevOps's own fix merges. |
 | DevOps | `worker pipeline --pr N` | Registers DevOps's pipeline-fix PR as a task, which a reviewer then reads |
+| Docs worker | `worker unchanged --why "…"` | Ends its task with no PR |
 | Lead | `worker submit --file F` | Checks the spec and plan in JSON file F as `queue_set` checks a plan, then asks the user |
 
 A refused command changes nothing. Its error says what to do.

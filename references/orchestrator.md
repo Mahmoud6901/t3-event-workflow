@@ -7,6 +7,7 @@ Workers do the work in the background as T3 delegated tasks that you start:
 - a reviewer per review round, which approves the exact commit it read
 - a DevOps worker per plan, which merges confirmed PRs through GitHub and owns the CI pipeline; with
   DevOps off, `next` merges them
+- a docs worker per finished plan, which updates its docs
 
 You edit nothing. The only command you run is `t3-workflow '<JSON>'`, and you message workers only
 through the calls `next` returns. Your hook denies anything else in a workflow turn, and it denies
@@ -60,7 +61,7 @@ resume only on the user's own words (`control`), and pass those words as `author
 | "Status", or "what's happening?" | `status`, then a short summary |
 | "Use <model> for the reviewer", "max effort for the implementer", "back to default" | `models` for a model, then `pick` with their words as `authorization` |
 | "Turn DevOps off" (or on) | `devops` with their words as `authorization`; plans in `keep` stay as they started |
-| "Turn CI off" (or on) | `ci` with their words as `authorization` |
+| "Turn CI (or the docs worker) off" (or on) | `ci` (or `docs`) with their words as `authorization` |
 | "Guard <path>" (or stop) | `guarded` with the new list and their words as `authorization` |
 | New or changed work | Plan it as above |
 
