@@ -3,9 +3,11 @@
 While T3 runs, every INTERVAL seconds, it reads T3's database read-only for each working worker's latest activity. A
 worker whose T3 run is still going but has not moved for its binding's quietMinutes is told to the user through `next`,
 and the orchestrator gets one message per quiet spell naming it. The orchestrator restarts it only on the user's word.
-A worker whose run ended is not watched: T3 wakes the orchestrator for that. For a plan without DevOps it also wakes
-the orchestrator once per merge step the harness can take (see Flow.merge_wake), and once when a quota some work waits
-for resets (Flow.reset_wake). Nothing else is sent or changed.
+A worker whose run ended is not watched: T3 wakes the orchestrator for that, and its hook records the end. An end the
+hook missed (T3 reworded its notice, say) is recorded once its notice is LATE old, and the orchestrator is woken once
+for it (Flow.late_wake). For a plan without DevOps it also wakes the orchestrator once per merge step the harness can
+take (see Flow.merge_wake), and once when a quota some work waits for resets (Flow.reset_wake). Nothing else is sent or
+changed.
 Each project with its own copy (homes.py) has its own watcher, running that copy: the shared one keeps them alive.
 A watcher whose code changed (an upgrade) ends, so the next start runs the new code.
 
@@ -26,10 +28,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import flow  # noqa: E402
 import health  # noqa: E402
 import homes  # noqa: E402
+import notices  # noqa: E402
 import places  # noqa: E402
 import watcher  # noqa: E402
 
 INTERVAL = 60
+LATE = timedelta(minutes=10)  # Long enough for the orchestrator's own turn to read a notice first.
 ACTIVE = ("starting", "running", "waiting")
 T3_HOME = places.T3_HOME
 NATIVE_DB = T3_HOME / "userdata" / "statev2.sqlite"
@@ -89,6 +93,43 @@ def scan(engine, native, send, now=None):
             engine.quiet_sent(project, worker["id"], since)
             told.append(worker["id"])
     return told
+
+
+def notice(native, thread_id, task):
+    """T3's notice on the orchestrator's thread that the run of `task` ended: (status, its text, when), or None."""
+    for created, payload in native.execute(
+            "SELECT created_at, payload_json FROM orchestration_v2_projection_messages WHERE thread_id=? AND role='user' "
+            "AND instr(payload_json, ?) > 0 ORDER BY created_at", (thread_id, task)):
+        found = notices.of(json.loads(payload)).get(task)
+        if found:
+            return (*found, created)
+    return None
+
+
+def repair(engine, native, now=None):
+    """Each working worker whose latest run's end the hook did not record, though T3's notice of it has been on the
+    orchestrator's thread for LATE, gets it recorded, marked late. Returns those workers."""
+    now = now or datetime.now(timezone.utc)
+    recorded = []
+    for project, config, state in engine.projects():
+        for worker in state["workers"].values():
+            task = (worker.get("taskIds") or [None])[-1]
+            if worker["state"] != "working" or not task or (worker.get("ended") or {}).get("taskId") == task \
+                    or not config.get("orchestrator"):
+                continue
+            found = notice(native, config["orchestrator"], task)
+            if not found or now - instant(found[2]) < LATE:
+                continue
+            status, words, _ = found
+            if engine.ended(project, {"taskId": task, "status": status, "text": words, "late": True}).get("new"):
+                recorded.append(worker["id"])
+    return recorded
+
+
+def lates(engine, send):
+    """The orchestrator is woken once for the ends `repair` recorded, so its `next` acts on them. Returns the projects
+    woken."""
+    return wake(engine, send, engine.late_wake, engine.late_woken, "scan")
 
 
 def merges(engine, send):
@@ -184,6 +225,10 @@ def main():
                     try:
                         for worker in scan(engine, native, t3_send):
                             log(f"told the orchestrator {worker} is quiet")
+                        for worker in repair(engine, native):
+                            log(f"recorded the end of {worker}'s run, which the hook missed")
+                        for project in lates(engine, t3_send):
+                            log(f"woke {project}'s orchestrator for workers' ends recorded late")
                         for project in merges(engine, t3_send):
                             log(f"woke {project}'s orchestrator for a merge step")
                         for project in resets(engine, t3_send):

@@ -42,7 +42,8 @@ class WatchTests(unittest.TestCase):
         with closing(sqlite3.connect(self.native_path)) as db, db:
             db.executescript("""
                 CREATE TABLE orchestration_v2_projection_runs (run_id TEXT, thread_id TEXT, status TEXT, requested_at TEXT);
-                CREATE TABLE orchestration_v2_projection_messages (thread_id TEXT, updated_at TEXT);
+                CREATE TABLE orchestration_v2_projection_messages (thread_id TEXT, role TEXT, created_at TEXT, updated_at TEXT,
+                                                                   payload_json TEXT);
                 CREATE TABLE orchestration_v2_projection_turn_items (thread_id TEXT, updated_at TEXT);""")
             db.execute("INSERT INTO orchestration_v2_projection_runs VALUES ('run-1', 'child', 'running', ?)", (at(0),))
         self.moved(1)
@@ -86,6 +87,55 @@ class WatchTests(unittest.TestCase):
         with closing(sqlite3.connect(self.native_path)) as db, db:
             db.execute("UPDATE orchestration_v2_projection_runs SET status='completed'")
         self.assertEqual(self.scan(120), [])
+
+    def ended(self, minutes, words="Delegated task task-1 (M30: Fix the login typo) in child thread child [completed]:"):
+        """The child's run ended, and T3 left its notice on the orchestrator's thread at START + minutes."""
+        with closing(sqlite3.connect(self.native_path)) as db, db:
+            db.execute("UPDATE orchestration_v2_projection_runs SET status='completed'")
+            db.execute("INSERT INTO orchestration_v2_projection_messages VALUES (?, 'user', ?, ?, ?)", (ORCH, at(minutes), at(minutes), json.dumps({
+                "role": "user", "createdBy": "agent", "creationSource": "server", "text": f"{words}\nDone.",
+                "delegatedCompletion": {"parentRunId": "run-orch-1", "generation": 1, "taskIds": ["task-1"]}})))
+
+    def repair(self, minutes):
+        """One pass's repair and its wake: (the workers recorded, the projects woken)."""
+        engine = flow.Flow(self.db)
+        native = sqlite3.connect(self.native_path)
+        try:
+            recorded = watch.repair(engine, native, now=START + timedelta(minutes=minutes))
+            return recorded, watch.lates(engine, lambda thread, text: self.sent.append((thread, text)))
+        finally:
+            native.close()
+            engine.close()
+
+    def test_a_workers_end_the_hook_missed_is_recorded_after_a_while_and_the_orchestrator_woken_once(self):
+        self.ended(30)
+        self.assertEqual(self.repair(35), ([], []), "the orchestrator's own turn reads a fresh notice")
+        self.assertEqual(self.repair(41), ([self.worker], [PROJECT]))
+        ((thread, text),) = self.sent
+        self.assertEqual(thread, ORCH)
+        self.assertIn("use t3 workflow", text)
+        self.assertIn('{"op":"next"}', text)
+        self.assertEqual(self.repair(45), ([], []), "recorded once, woken once")
+        (nudge,) = self.op("next")["calls"]
+        self.assertEqual(nudge["tool"], "t3_thread_send", "next acts on the end: the implementer has not reported")
+
+    def test_a_late_end_next_already_acted_on_wakes_nobody(self):
+        self.ended(30)
+        engine = flow.Flow(self.db)
+        native = sqlite3.connect(self.native_path)
+        try:
+            self.assertEqual(watch.repair(engine, native, now=START + timedelta(minutes=41)), [self.worker])
+        finally:
+            native.close()
+            engine.close()
+        self.op("next")
+        self.assertEqual(self.repair(42), ([], []))
+        self.assertEqual(self.sent, [])
+
+    def test_an_end_the_hook_recorded_is_left_alone(self):
+        self.ended(30)
+        self.op("ended", taskId="task-1", status="completed")
+        self.assertEqual(self.repair(41), ([], []))
 
     def test_a_failed_send_is_tried_again_on_each_pass_and_keeps_failing_into_a_problem(self):
         down = MagicMock(side_effect=OSError("T3 refused"))

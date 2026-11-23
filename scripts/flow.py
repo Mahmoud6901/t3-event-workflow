@@ -874,10 +874,12 @@ class Flow:
     def ended(self, project, req):
         """A worker's T3 run ended (the hook reads it from the "Delegated task …" wake, with the notice's text). `next`
         acts on it. An end that arrives before `done` recorded its run waits for it. A failed run that stopped at its
-        model's quota is learned: that model counts as at its limit until the quota resets."""
+        model's quota is learned: that model counts as at its limit until the quota resets. A late end is one the
+        watcher found that the hook missed; late_wake wakes the orchestrator for it."""
         run, status = text(req.get("taskId"), "taskId"), req.get("status") or "completed"
         until = quota_until(req.get("text")) if status != "completed" and isinstance(req.get("text"), str) else None
         quota = {"quota": until} if until else {}
+        quota = {**quota, "late": True} if req.get("late") is True else quota
 
         def change(config, state):
             for worker in state["workers"].values():
@@ -1762,6 +1764,25 @@ class Flow:
             state["resetWoken"] = key
             return {"key": key}
         return self.transact(project, change, "reset_woken")
+
+    def late_wake(self, project):
+        """The watcher's check: whether the orchestrator should run `next` for workers' ends the watcher recorded late,
+        which no `next` has acted on yet. Once per set of such ends."""
+        config, state = self.load(project)
+        due = sorted(f"{w['id']}@{w['ended']['taskId']}" for w in state["workers"].values()
+                     if (w.get("ended") or {}).get("late") and not w["ended"].get("seen"))
+        key = ",".join(due)
+        if state["control"] != "active" or not due or state.get("lateWoken") == key:
+            return {"send": False}
+        return {"send": True, "key": key, "message": (
+            "use t3 workflow: workers finished, and the workflow had missed T3's notices of it; they are recorded now. "
+            "Run t3-workflow '{\"op\":\"next\"}' and carry on.")}
+
+    def late_woken(self, project, key):
+        def change(config, state):
+            state["lateWoken"] = key
+            return {"key": key}
+        return self.transact(project, change, "late_woken")
 
     def failed(self, project, worker, args):
         cause = args.get("cause")

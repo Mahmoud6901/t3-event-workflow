@@ -54,7 +54,7 @@ class HookTests(unittest.TestCase):
         return harness.run(["--db", str(self.db)], json.dumps({"op": op, "projectId": PROJECT, "threadId": ORCH, **fields}),
                            hub=lambda repo: None, jev=lambda config, context, role: {})
 
-    def message(self, text, thread=ORCH, run=1, created_by="user", source="web"):
+    def message(self, text, thread=ORCH, run=1, created_by="user", source="web", **extra):
         """A message in the thread's turn `run`; the turn is running."""
         self.sent += 1
         with closing(sqlite3.connect(self.native)) as db, db:
@@ -64,11 +64,15 @@ class HookTests(unittest.TestCase):
                            (f"run-{thread}-{run}", thread, run, "running", json.dumps({"ordinal": run})))
             db.execute("INSERT INTO orchestration_v2_projection_messages VALUES (?,?,?,?,?,?)", (
                 f"m{self.sent}", thread, f"run-{thread}-{run}", "user", f"2026-11-10T00:00:{self.sent:02d}Z",
-                json.dumps({"id": f"m{self.sent}", "role": "user", "createdBy": created_by, "creationSource": source, "text": text})))
+                json.dumps({"id": f"m{self.sent}", "role": "user", "createdBy": created_by, "creationSource": source, "text": text,
+                            **extra})))
 
-    def wake(self, task_id, run=1, status="completed", body="Done."):
-        self.message(f"Delegated task {task_id} (M30: Fix the login typo) [{status}]:\n{body}", run=run,
-                     created_by="agent", source="server")
+    def wake(self, task_id, run=1, status="completed", body="Done.", words=None):
+        """T3's notice that the run of T3 task `task_id` ended, worded as T3 words it since 2026-11-23 unless `words`."""
+        words = words or f"Delegated task {task_id} (M30: Fix the login typo) in child thread child [{status}]:"
+        self.message(f"{words}\n{body}", run=run, created_by="agent", source="server",
+                     delegatedCompletion={"parentRunId": f"run-{ORCH}-1", "generation": 1, "taskIds": [task_id]})
+        return f"{words}\n{body}"
 
     def hook(self, hook, session=f"sess-{ORCH}", cwd=None, runtime="claude", **data):
         return t3_hooks.handle(runtime, hook, {"cwd": str(cwd or self.workspace), "session_id": session, **data})
@@ -150,6 +154,28 @@ class HookTests(unittest.TestCase):
         self.hook("user_prompt_submit", prompt="Delegated task task-1")
         (fresh,) = self.op("next")["calls"]
         self.assertEqual(fresh["tool"], "delegate_task", "a follow-up would stop at the same quota")
+
+    def test_a_notice_in_t3s_earlier_wording_is_read_too(self):
+        self.started()
+        self.wake("task-1", run=2, words="Delegated task task-1 (M30: Fix the login typo) [completed]:")
+        self.hook("user_prompt_submit", prompt="Delegated task task-1")
+        (nudge,) = self.op("next")["calls"]
+        self.assertEqual(nudge["tool"], "t3_thread_send")
+
+    def test_a_label_with_brackets_of_its_own_does_not_hide_the_runs_status(self):
+        self.started()
+        self.wake("task-1", run=2, status="failed", body="⚠ Individual quota reached. Resets in 2h.",
+                  words="Delegated task task-1 (M30: Fix [the] login (typo)) in child thread child [failed]:")
+        self.hook("user_prompt_submit", prompt="Delegated task task-1")
+        (fresh,) = self.op("next")["calls"]
+        self.assertEqual(fresh["tool"], "delegate_task", "read as failed at its quota")
+
+    def test_a_notice_t3_words_differently_again_is_still_read_from_the_task_it_lists(self):
+        self.started()
+        prompt = self.wake("task-1", run=2, words="Your delegated work task-1 is finished.")
+        self.hook("user_prompt_submit", prompt=prompt)
+        (nudge,) = self.op("next")["calls"]
+        self.assertEqual(nudge["tool"], "t3_thread_send")
 
     def test_the_turn_cannot_end_with_calls_unrecorded_or_a_workers_end_unread(self):
         self.message("use t3 workflow: fix the login typo")

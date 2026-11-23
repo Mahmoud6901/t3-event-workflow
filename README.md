@@ -95,6 +95,9 @@ version, and any background part that keeps failing; it exits 1 if one does. `t3
 | `~/Library/LaunchAgents/com.t3-workflow.watch.plist` (macOS) | The same, as a LaunchAgent |
 | `~/.config/systemd/user/t3-workflow-watch.service` (Linux) | The same, as a systemd user unit, enabled with `systemctl --user enable` |
 
+The hooks record a worker's end from T3's notice of it. If they miss one, as they did once when T3 reworded
+its notice, the watcher records it 10 minutes after the notice and wakes the orchestrator once.
+
 The workflow has only been tried on Windows so far. The macOS and Linux parts are covered by tests, not
 yet by a real login; reports are welcome.
 

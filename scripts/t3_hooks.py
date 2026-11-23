@@ -25,6 +25,7 @@ from fence import Fence, operation  # noqa: E402 - standard library only, like t
 import harness  # noqa: E402
 import health  # noqa: E402 - standard library only, like this file
 import homes  # noqa: E402
+import notices  # noqa: E402 - standard library only, like this file
 import places  # noqa: E402
 import store  # noqa: E402 - standard library only, like this file
 import trigger  # noqa: E402
@@ -42,7 +43,6 @@ TRACE = []  # Why this call decided what it did; written to state/hook-calls.jso
 READ_TOOLS = {"Read", "Grep", "Glob", "AskUserQuestion", "ToolSearch"}
 T3_TOOLS = {"delegate_task", "task_cancel", "task_status", "task_list", "orchestrator_capabilities"}
 NO_SESSIONS = {"t3_thread_launch"}  # The user's rule: no new sessions; workers are delegated tasks.
-WAKE = re.compile(r"^Delegated task (\S+)(?: \((.*)\))? \[([A-Za-z_]+)\]:", re.MULTILINE)
 NEXT = "t3-workflow '{\"op\":\"next\"}'"
 RUNTIMES = ("claude", "codex")
 # Codex has no Read, Grep or Glob tools, so a single plain read command is allowed too (in either runtime).
@@ -209,14 +209,10 @@ def wakes(native, thread_id, prompt=None):
     """{T3 task id: (status, the notice's text)} for each "Delegated task …" notice in this turn (and the prompt being
     submitted). The text is how the run ended, a quota it stopped at included."""
     run_id = native.active_run(thread_id)
-    texts = [m.get("text") or "" for m in (native.run_messages(thread_id, run_id) if run_id else [])]
-    if isinstance(prompt, str):
-        texts.append(prompt)
     found = {}
-    for text in texts:
-        notices = list(WAKE.finditer(text))
-        for notice, after in zip(notices, [*notices[1:], None]):
-            found[notice.group(1)] = (notice.group(3).lower(), text[notice.end():after.start() if after else len(text)].strip())
+    for message in (native.run_messages(thread_id, run_id) if run_id else []):
+        found.update(notices.of(message))
+    found.update(notices.read(prompt))
     return found
 
 
