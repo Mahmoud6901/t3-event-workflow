@@ -127,6 +127,15 @@ After `uv tool upgrade t3-event-workflow`, run `t3-workflow upgrade`. It moves e
 version kept in the shared data into its own copy, and brings every copy to the new version. `t3-workflow status` names a copy that
 is older. Workers that started before keep working, and each project's watcher restarts on the new code.
 
+## Alerts on your phone
+
+The workflow sends no notifications of its own. T3 Code's mobile app can alert you when the
+orchestrator's thread finishes a turn, fails, needs an approval or asks for input. It needs T3 Connect
+on the desktop (Settings → Sharing & access) and Device Notifications in the mobile app. A connection
+over your local network alone gives no alerts. See T3's
+[mobile notifications](https://github.com/pingdotgg/t3code/blob/main/docs/user/mobile-notifications.md)
+and [remote access](https://github.com/pingdotgg/t3code/blob/main/docs/user/remote-access.md) docs.
+
 ## Read next
 
 - [SKILL.md](SKILL.md): the workflow on one page

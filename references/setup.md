@@ -144,6 +144,8 @@ Tell the user:
 - that before a Codex model runs this thread, they trust the workflow's hooks once: run `codex`, type
   `/hooks` and trust the three `t3-workflow hook` hooks. Without that, Codex skips them, and `t3-workflow`
   does not run.
+- that T3 Code's mobile app can alert them when this thread finishes a turn or needs them, as the
+  README's [alerts on your phone](../README.md#alerts-on-your-phone) says
 
 Never ask the user to switch your model.
 
