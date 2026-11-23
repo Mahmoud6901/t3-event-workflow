@@ -34,6 +34,11 @@ on your choice or the default. One exception: while a model is at its usage limi
 role's new workers on an approved model with capacity, and they go back to your model when the limit
 resets.
 
+A reviewer is never of the same family as the model that wrote its PR. The family is the model's maker,
+whichever provider runs it: Anthropic for Claude, OpenAI for GPT, Google for Gemini. When the reviewer's
+model, your choice included, is of the implementer's family, the reviewer runs on the best-scored approved
+reviewer of another family that T3 runs and that has capacity. When there is none, it runs as before.
+
 A limit counts when T3 shows it as spent, or when a worker's run stopped at the model's quota, as
 in "Individual quota reached… Resets in 4h11m25s". That worker is not asked to finish, since it would
 stop the same way. A new one takes over its task at once, on Jev's choice among the models with

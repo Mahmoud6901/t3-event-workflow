@@ -49,7 +49,8 @@ step 1:
 - A role runs on the model and effort the user chose. Jev chooses an implementer's model they skipped,
   among the models this T3 runs; without its answer, the `fallback`. Jev never sets an effort: a
   skipped one is the default, `xhigh` for the implementer. A reviewer and DevOps run on the user's
-  choice, else the default.
+  choice, else the default. A reviewer of the same family as the model that wrote its PR (its maker:
+  Anthropic, OpenAI, Google) runs instead on the best-scored approved reviewer of another family.
 - While a model is at its usage limit (T3 shows it spent, or a worker's run stopped at its quota), Jev
   starts that role's new workers on an approved model with capacity, over the user's choice too, until
   the limit resets.

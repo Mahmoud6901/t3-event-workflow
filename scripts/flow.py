@@ -352,6 +352,17 @@ def ci_checks(config, state):
     return config["github"]["requiredChecks"] if state.get("ciOn", True) else []
 
 
+FAMILIES = (("claude-", "Anthropic"), ("anthropic/", "Anthropic"), ("gpt-", "OpenAI"), ("openai/", "OpenAI"),
+            ("gemini-", "Google"), ("google/", "Google"))
+
+
+def family(model):
+    """The model's maker, whichever provider runs it: a known prefix's, else the part of a maker/model id before its
+    slash, else the id itself."""
+    name = str(model or "").lower()
+    return next((maker for prefix, maker in FAMILIES if name.startswith(prefix)), name.split("/", 1)[0])
+
+
 def uncount(item, role):
     """The role's quiet replacement on this work (a task, or a plan's DevOps entry) no longer counts."""
     if item and role in (item.get("quietReplaced") or []):
@@ -1404,11 +1415,36 @@ class Flow:
 
     def start_reviewer(self, config, state, task, choice=None):
         worker = self.add_worker(config, state, "reviewer", task["plan"], task["id"], choice)
+        self.other_family(config, state, task, worker)
         worker["job"] = {"kind": "review", "reported": False, "nudged": 0}
         task["reviewer"] = worker["id"]
         self.move(task, "reviewing")
         self.delegate(config, state, worker, f"Review {task['plan']}: {task['task']}", "review", "shared",
                       reviewer_brief(config, task, worker))
+
+    def other_family(self, config, state, task, worker):
+        """A reviewer whose model is of the same family as the model that wrote the PR (its implementer's; for a pipeline
+        fix, its plan's DevOps worker's) runs instead on the best-scored approved reviewer model of another family that
+        T3 runs and that has capacity, over the user's pick too. With none, it runs as it would have."""
+        author = state["workers"].get(task.get("implementer"))
+        if not author or family(author["model"]) != family(worker["model"]):
+            return
+        lists, spent = t3_lists()[0], limits_now(state)
+        others = [m for m, item in config["models"].items()
+                  if "reviewer" in item.get("roles", []) and family(m) != family(author["model"])
+                  and runs(lists, m, item["provider"]) is not False and not at_limit(spent, m, item["provider"])]
+        best = next(iter(jev.ranked(others)), None)
+        if not best:
+            return
+        if worker.get("standsInFor"):  # The usage-limit line named the stand-in this one replaces.
+            state["tell"] = [line for line in state["tell"] if not line.startswith(
+                f"{worker['standsInFor']} is at its usage limit, so a new reviewer runs on {worker['model']} ")]
+        for key in ("entry", "standsInFor"):
+            worker.pop(key, None)
+        if worker["effort"] not in EFFORTS:  # A level only the model it would have run on has.
+            worker["effort"] = config["defaults"]["reviewerEffort"]
+        worker.update(model=best, modelSource="family", otherThan=author["model"],
+                      otherRole="DevOps worker" if author["role"] == "devops" else "implementer")
 
     def confirm(self, state, task, pr, checks):
         """The orchestrator's rule: the reviewed commit is the head, CI has not failed, only the task's paths changed, and
@@ -2235,6 +2271,8 @@ def started_line(state, worker):
     why = WHY_MODEL.get(worker.get("modelSource"))
     if worker.get("modelSource") == "limit":
         why = f"a stand-in for {worker.get('standsInFor') or 'a model at its usage limit'}"
+    if worker.get("modelSource") == "family":
+        why = f"a different family than the {worker['otherRole']}'s {worker['otherThan']}"
     return f"{role} for {what} started on {worker['model']} at {worker['effort']}" + (f" ({why})." if why else ".")
 
 

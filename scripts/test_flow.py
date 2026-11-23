@@ -373,6 +373,29 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(self.orchestrator("pick", role="reviewer", model="claude-opus-5-5", **say)["ok"])
         self.assertEqual(self.status()["models"]["reviewer"]["modelSource"], "pick", "the user's pick stays")
 
+    def test_a_reviewer_of_the_implementers_family_runs_on_the_best_scored_reviewer_of_another_family(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
+        call, review, _ = self.to_review(picks={"reviewer": {"model": "gpt-6.2-sol", "effort": "ultra"}})
+        self.assertEqual(call["arguments"]["target"]["model"], "gpt-6.2-astra")
+        self.assertEqual(review["arguments"]["target"], {"providerInstanceId": "antigravity", "model": "gemini-4-neon",
+                                                         "options": {"thought_level": "xhigh"}},
+                         "the user's pick gives way, and so does the effort only that model has")
+        self.assertEqual(self.last_done["tell"], ["Reviewer for Fix the login typo (M30) started on gemini-4-neon at xhigh "
+                                                  "(a different family than the implementer's gpt-6.2-astra)."])
+
+    def test_with_no_reviewer_of_another_family_that_can_run_the_reviewer_runs_as_it_would_have(self):
+        self.t3_caches(usage={"claudeAgent": SPENT})  # No Antigravity, and every Claude model is at its limit.
+        _, review, _ = self.to_review()
+        self.assertEqual(review["arguments"]["target"]["model"], "gpt-6.2-astra")
+        self.assertEqual(self.last_done["tell"],
+                         ["Reviewer for Fix the login typo (M30) started on gpt-6.2-astra at xhigh (the default)."])
+
+    def test_models_belong_to_their_makers_family_whichever_provider_runs_them(self):
+        self.assertEqual([flow.family(m) for m in ("claude-opus-5-5", "anthropic/claude-sonnet-4", "gpt-6.2-astra",
+                                                   "openai/gpt-x", "gemini-4-neon", "google/gemini-4-neon",
+                                                   "qwen/qwen3.8-max", "made-up")],
+                         ["Anthropic", "Anthropic", "OpenAI", "OpenAI", "Google", "Google", "qwen", "made-up"])
+
     def test_gemini_4_neon_runs_through_antigravity_in_its_effort_terms_and_no_longer_through_goose(self):
         goose_neon = {"slug": "google/gemini-4-neon", "capabilities": {"optionDescriptors": [{"id": "provider"}]}}
         self.t3_caches(goose=GOOSE_LIST + [goose_neon], antigravity=ANTIGRAVITY_LIST)
@@ -412,7 +435,7 @@ class FlowTests(unittest.TestCase):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
         self.jev_answer.update(devops="gemini-4-neon")  # The reviewer's answer stays Sonnet 5.5, not its default.
         _, review, tree = self.to_review()
-        self.assertEqual(review["arguments"]["target"]["model"], "gpt-6.2-astra")
+        self.assertEqual(review["arguments"]["target"]["model"], "gemini-4-neon", "the implementer's Astra is OpenAI's")
         head = git(tree, "rev-parse", "HEAD")
         self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve", "--sha", head)["ok"])
         (devops,) = self.start()
@@ -792,7 +815,8 @@ class FlowTests(unittest.TestCase):
     def test_each_confirmed_start_names_its_role_task_model_effort_and_why_once(self):
         call, review, tree = self.to_review()
         self.assertEqual(self.last_done["tell"],
-                         ["Reviewer for Fix the login typo (M30) started on gpt-6.2-astra at xhigh (the default)."])
+                         ["Reviewer for Fix the login typo (M30) started on gemini-4-neon at xhigh (a different "
+                          "family than the implementer's gpt-6.2-astra)."])
         self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve",
                                     "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
         self.start()
@@ -847,7 +871,7 @@ class FlowTests(unittest.TestCase):
         (review,) = self.start()
         arguments = review["arguments"]
         self.assertEqual((arguments["isolation"], arguments["role"]), ("shared", "review"))
-        self.assertEqual(arguments["target"]["model"], "gpt-6.2-astra")
+        self.assertEqual(arguments["target"]["model"], "gemini-4-neon", "not the family of the implementer's Astra")
         head = git(tree, "rev-parse", "HEAD")
         self.assertIn(head, arguments["task"])
         self.assertIn(str(tree.resolve()).replace("\\", "/"), arguments["task"])
@@ -1315,7 +1339,8 @@ class FlowTests(unittest.TestCase):
         self.assertIn("worker take", devops["arguments"]["task"])
 
     def test_a_pipeline_failure_holds_the_task_until_devops_own_fix_is_reviewed_and_merged(self):
-        _, devops, _ = self.to_devops()
+        self.t3_caches()
+        _, devops, _ = self.to_devops(picks={"reviewer": "claude-opus-5-5"})
         job = self.worker("take", *devops)
         self.hub.checks_on[job["head"]] = {"acceptance": "failure"}
         held = self.worker("failed", *devops, "--cause", "pipeline", "--detail", "The runner image lost Node")
@@ -1334,6 +1359,9 @@ class FlowTests(unittest.TestCase):
         self.assertIsNone(self.worker("take", *devops)["job"])
         (review,) = self.start()
         self.assertIn("PR #9", review["arguments"]["task"])
+        self.assertEqual(review["arguments"]["target"]["model"], "gpt-6.2-astra", "DevOps wrote it on Sonnet 5.5")
+        self.assertEqual(self.last_done["tell"], ["Reviewer for Fix the pipeline (PR #9) (M30) started on gpt-6.2-astra at "
+                                                  "xhigh (a different family than the DevOps worker's claude-sonnet-5-5)."])
         self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve",
                                     "--sha", git(fix_tree, "rev-parse", "HEAD"))["ok"])
         (wake,) = self.start()

@@ -15,6 +15,9 @@ back. Everything else runs in the background, as T3 delegated tasks the orchestr
 | Reviewer | Reads the PR at one commit, tries the change, and approves it or asks for changes | The user's choice, else GPT-6.2 Astra, `xhigh` |
 | DevOps | One per plan: updates and squash-merges confirmed PRs, triages CI, owns the pipeline. The user can turn it off; then the harness merges | The user's choice, else Sonnet 5.5, `high` |
 
+A reviewer whose model is of the same family (maker) as the model that wrote its PR runs instead on the
+best-scored approved reviewer of another family that can run, over the user's choice too.
+
 While a model is at its usage limit (T3 shows it spent, or a worker's run stopped at its quota), Jev starts
 that role's new workers on an approved model with capacity, over the user's choice too, until the limit
 resets. A worker stopped at its quota is replaced at once; with no model left with capacity, its task
