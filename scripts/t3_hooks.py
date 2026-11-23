@@ -206,12 +206,18 @@ def orchestrator_tool(config, thread_id, tool, tool_input, runtime="claude"):
 
 
 def wakes(native, thread_id, prompt=None):
-    """{T3 task id: status} for each "Delegated task …" notice in this turn (and the prompt being submitted)."""
+    """{T3 task id: (status, the notice's text)} for each "Delegated task …" notice in this turn (and the prompt being
+    submitted). The text is how the run ended, a quota it stopped at included."""
     run_id = native.active_run(thread_id)
     texts = [m.get("text") or "" for m in (native.run_messages(thread_id, run_id) if run_id else [])]
     if isinstance(prompt, str):
         texts.append(prompt)
-    return {match.group(1): match.group(3).lower() for text in texts for match in WAKE.finditer(text)}
+    found = {}
+    for text in texts:
+        notices = list(WAKE.finditer(text))
+        for notice, after in zip(notices, [*notices[1:], None]):
+            found[notice.group(1)] = (notice.group(3).lower(), text[notice.end():after.start() if after else len(text)].strip())
+    return found
 
 
 def record_wakes(config, found):
@@ -221,8 +227,8 @@ def record_wakes(config, found):
     import flow
     engine = flow.Flow(HARNESS_DB)
     try:
-        new = sum(1 for task_id, status in found.items()
-                  if engine.ended(config["projectId"], {"taskId": task_id, "status": status}).get("new"))
+        new = sum(1 for task_id, (status, words) in found.items()
+                  if engine.ended(config["projectId"], {"taskId": task_id, "status": status, "text": words}).get("new"))
     finally:
         engine.close()
     TRACE.append(f"wakes {sorted(found)}: {new} new")

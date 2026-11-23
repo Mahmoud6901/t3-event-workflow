@@ -5,7 +5,7 @@ makes the T3 calls it returns; workers report through `harness.py worker <comman
 and every write is one transaction on the harness database (store.py).
 """
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hmac
 import json
 from pathlib import Path
@@ -13,6 +13,7 @@ import re
 import secrets
 import subprocess
 import sys
+import zoneinfo
 
 import github
 import health
@@ -237,6 +238,74 @@ def passed(moment):
 def at_limit(spent, model, provider):
     """Whether the model's provider has a spent usage limit that covers it."""
     return any(family in model for family in spent.get(provider, ()))
+
+
+# How a run that stopped at its model's quota ends (T3's wake notices, 2026-11): Antigravity's "Individual quota reached
+# ... Resets in 4h11m25s", Claude's "rate limit reached ... resets 1:50am (Europe/Berlin)", a provider's "add more credits".
+QUOTA = re.compile(r"quota (?:reached|exceeded)|exceeded (?:your|the) quota|out of quota|(?:usage|rate) limit (?:reached|exceeded)"
+                   r"|(?:hit|reached) (?:your|the) [\w -]{0,20}limit|(?:add|buy|purchase) more credits|(?:out of|insufficient) credits",
+                   re.IGNORECASE)
+RESETS_IN = re.compile(r"(?:resets?|try again)\s+in\s+([^.;\n]+)", re.IGNORECASE)
+SPAN = re.compile(r"(\d+)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])", re.IGNORECASE)
+RESETS_AT = re.compile(r"resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)?\s*(?:\(([\w/+-]+)\))?", re.IGNORECASE)
+QUOTA_WAIT = timedelta(minutes=30)  # A quota that names no reset is tried again after this.
+
+
+def quota_until(text, at=None):
+    """When the quota a failed run stopped at resets (ISO, UTC), read from the end T3's wake notice gives; None when the
+    run did not stop at a quota. A clock time is read in the zone the message names, else this computer's."""
+    if not QUOTA.search(text or ""):
+        return None
+    at = at or datetime.now(timezone.utc)
+    found = RESETS_IN.search(text)
+    units = {"d": "days", "h": "hours", "m": "minutes", "s": "seconds"}
+    wait = sum((timedelta(**{units[unit[0].lower()]: int(n)}) for n, unit in SPAN.findall(found.group(1) if found else "")),
+               timedelta())
+    clock = None if wait else RESETS_AT.search(text)
+    if clock and (clock.group(2) or clock.group(3)):
+        hour, minute, meridiem, zone = clock.groups()
+        try:
+            local = at.astimezone(zoneinfo.ZoneInfo(zone) if zone else None)
+        except (KeyError, ValueError):  # A zone this computer cannot read (Windows without tzdata).
+            local = at.astimezone()
+        try:
+            moment = local.replace(hour=int(hour) % 12 + (12 if meridiem.lower() == "pm" else 0) if meridiem else int(hour),
+                                   minute=int(minute or 0), second=0, microsecond=0)
+            wait = (moment if moment > local else moment + timedelta(days=1)).astimezone(timezone.utc) - at
+        except ValueError:
+            wait = None
+    return (at + (wait or QUOTA_WAIT)).isoformat(timespec="seconds")
+
+
+def learn(config, state, worker, until):
+    """A run of this worker stopped at its model's quota: that model counts as at its limit until `until`."""
+    provider = (worker.get("entry") or config["models"].get(worker["model"]) or {}).get("provider")
+    limits = {m: limit for m, limit in (state.get("limits") or {}).items() if not passed(limit["until"])}
+    state["limits"] = {**limits, worker["model"]: {"provider": provider, "until": until}}
+
+
+def limits_now(state):
+    """The usage limits that keep a model out now: T3's, and each quota a worker's run stopped at, until it resets."""
+    spent = t3_limits()
+    for model, limit in (state.get("limits") or {}).items():
+        if not passed(limit["until"]):
+            spent.setdefault(limit["provider"], set()).add(model)
+    return spent
+
+
+def out_until(config, state, role, spent, lists):
+    """When no model a new worker in the role could run on has capacity, and a quota a run stopped at is what keeps
+    them out: the earliest of those resets, which its work waits for. None while one has capacity, or when only T3's
+    limits keep them out (that worker starts as before)."""
+    model, provider = usual(config, state, role)
+    able = {m: item["provider"] for m, item in config["models"].items()
+            if role in item.get("roles", []) and runs(lists, m, item["provider"]) is not False}
+    if model:
+        able[model] = provider
+    if not able or any(not at_limit(spent, m, p) for m, p in able.items()):
+        return None
+    resets = [limit["until"] for m, limit in (state.get("limits") or {}).items() if m in able and not passed(limit["until"])]
+    return min(resets) if resets else None
 
 
 def usual(config, state, role):
@@ -696,7 +765,13 @@ class Flow:
         config, state = self.load(project)
         ready = {t["id"] for t in state["tasks"].values()
                  if t["state"] == "waiting" and self.unblocked(state, t) and not self.parked(state, t)}
-        choices, facts = {}, {}
+        back, choices, facts, waits = set(), {}, {}, {}
+        for worker in state["workers"].values():  # Quota-stopped workers whose work goes back to start anew.
+            if (worker.get("ended") or {}).get("quota") and not worker["ended"].get("seen") and worker["state"] != "cancelled":
+                task = self.owing(state, worker)
+                if task or worker["role"] == "devops":
+                    back.add((worker["role"], task and task["id"]))
+        ready |= {task_id for role, task_id in back if role == "implementer"}
         if state["control"] == "active":
             gh = self.hub_for(config["github"]["repo"])
             for task in state["tasks"].values():
@@ -707,39 +782,57 @@ class Flow:
                         health.ok(self.path.parent, "github")
                     except github.Failed as error:  # The rule waits for the next wake.
                         health.failed(self.path.parent, "github", error)
-            reviews = sorted(t["id"] for t in state["tasks"].values() if t["state"] == "review_needed")
-            merges = any(devops_on(state, name) and state["devops"].get(name, {}).get("state", "none") == "none"
-                         and any(t["plan"] == name and t["state"] in {"approved", "confirmed", "ci_failed"}
-                                 for t in state["tasks"].values()) for name in state["plans"])
+            reviews = sorted({t["id"] for t in state["tasks"].values() if t["state"] == "review_needed"}
+                             | {task_id for role, task_id in back if role == "reviewer"})
+            merges = any(role == "devops" for role, _ in back) or any(
+                devops_on(state, name) and state["devops"].get(name, {}).get("state", "none") == "none"
+                and any(t["plan"] == name and t["state"] in {"approved", "confirmed", "ci_failed"}
+                        for t in state["tasks"].values()) for name in state["plans"])
             if ready or reviews or merges:
-                lists, spent = t3_lists()[0], t3_limits()
+                lists, spent = t3_lists()[0], limits_now(state)
+                waits = {role: out_until(config, state, role, spent, lists) for role in ROLES}
                 for role, task_ids in (("implementer", sorted(ready)), ("reviewer", reviews)):
-                    for task_id in task_ids:
+                    for task_id in task_ids if not waits[role] else ():
                         choices[role, task_id] = self.advise(config, state, role, described(state["tasks"][task_id]),
                                                              lists, spent)
-                if merges:  # One DevOps serves a whole plan, so its stand-in is not a task's.
+                if merges and not waits["devops"]:  # One DevOps serves a whole plan, so its stand-in is not a task's.
                     choices["devops"] = self.advise(config, state, "devops", {
                         "request": "Merge the plan's confirmed pull requests through GitHub and triage CI failures"},
                         lists, spent)
 
         def change(config, state):
+            def held(item, role, label):
+                """No model the role could run on has capacity until a quota resets: the work waits, told once."""
+                until = waits.get(role)
+                if until and item.get("held") != until:
+                    state["tell"].append(f"{label} waits until {until}: every model its {role} could run on is at its "
+                                         "usage limit. It starts by itself then.")
+                if until:
+                    item["held"] = until
+                else:
+                    item.pop("held", None)
+                return bool(until)
+
             for worker in state["workers"].values():
                 if worker.get("ended") and not worker["ended"].get("seen"):
                     worker["ended"]["seen"] = True
-                    self.settle(state, worker)
+                    self.settle(state, worker, waits)
             if state["control"] == "active":
                 for task in state["tasks"].values():
+                    label = f"{task['task']} ({task['plan']})"
                     if task["state"] == "waiting" and self.unblocked(state, task) and self.parked(state, task):
                         self.resume(config, state, task)
                     elif task["state"] == "waiting" and self.unblocked(state, task):
-                        self.start_implementer(config, state, task, choices.get(("implementer", task["id"])))
+                        if not held(task, "implementer", label):
+                            self.start_implementer(config, state, task, choices.get(("implementer", task["id"])))
                     elif task["state"] == "review_needed":
-                        self.start_reviewer(config, state, task, choices.get(("reviewer", task["id"])))
+                        if not held(task, "reviewer", label):
+                            self.start_reviewer(config, state, task, choices.get(("reviewer", task["id"])))
                     elif task["state"] == "approved" and task["id"] in facts and facts[task["id"]][0] == task["rev"]:
                         self.confirm(state, task, *facts[task["id"]][1:])
                     elif task["state"] == "implementing" and task.get("fix"):
                         self.send_fix(config, state, task)
-                self.call_devops(config, state, choices.get("devops"))
+                self.call_devops(config, state, choices.get("devops"), lambda entry, name: held(entry, "devops", f"Plan {name}"))
             calls = list(state["calls"].values())
             told, state["tell"] = state["tell"], []
             asks = [a for a in state["asks"].values() if not a.get("asked")]
@@ -769,6 +862,8 @@ class Flow:
                     worker["state"] = "working" if worker["state"] != "cancelled" else "cancelled"
                     early = [e for e in state.get("unmatched", []) if e["taskId"] == item["taskId"]]
                     worker["ended"] = {**early[0], "seen": False} if early else None
+                    if early and early[0].get("quota"):
+                        learn(config, state, worker, early[0]["quota"])
                     state["unmatched"] = [e for e in state.get("unmatched", []) if e["taskId"] != item["taskId"]]
                 if call["tool"] == "task_cancel":
                     worker["state"] = "cancelled"
@@ -777,21 +872,26 @@ class Flow:
         return self.transact(project, change, "done")
 
     def ended(self, project, req):
-        """A worker's T3 run ended (the hook reads it from the "Delegated task …" wake). `next` acts on it. An end
-        that arrives before `done` recorded its run waits for it."""
+        """A worker's T3 run ended (the hook reads it from the "Delegated task …" wake, with the notice's text). `next`
+        acts on it. An end that arrives before `done` recorded its run waits for it. A failed run that stopped at its
+        model's quota is learned: that model counts as at its limit until the quota resets."""
         run, status = text(req.get("taskId"), "taskId"), req.get("status") or "completed"
+        until = quota_until(req.get("text")) if status != "completed" and isinstance(req.get("text"), str) else None
+        quota = {"quota": until} if until else {}
 
         def change(config, state):
             for worker in state["workers"].values():
                 if run in worker["taskIds"]:
+                    if until:
+                        learn(config, state, worker, until)
                     # An older run's end means nothing now, and an end already recorded is not news.
                     new = worker["taskIds"][-1] == run and (worker.get("ended") or {}).get("taskId") != run
                     if new:
-                        worker["ended"] = {"taskId": run, "status": status, "at": now(), "seen": False}
+                        worker["ended"] = {"taskId": run, "status": status, "at": now(), "seen": False, **quota}
                     return {"worker": worker["id"], "new": new}
             new = not any(e["taskId"] == run for e in state.setdefault("unmatched", []))
             if new:
-                state["unmatched"].append({"taskId": run, "status": status, "at": now()})
+                state["unmatched"].append({"taskId": run, "status": status, "at": now(), **quota})
             return {"worker": None, "new": new}
         return self.transact(project, change, "ended")
 
@@ -807,7 +907,7 @@ class Flow:
         config, state = self.load(project)
         task = state["tasks"][self.task_id(state, name)]
         kept = task.get("choice") or {}  # Jev's advice at the task's first start.
-        advice, spent = {}, t3_limits()
+        advice, spent = {}, limits_now(state)
         # With a limit spent the new worker may need a stand-in; a stand-in, or a choice a limit narrowed, is advised afresh.
         stale = kept.get("limit") or kept.get("narrowed")
         if (spent or stale) and role_of(task) in ("implementer", "reviewer"):
@@ -831,9 +931,7 @@ class Flow:
             elif role == "reviewer":
                 self.start_reviewer(config, state, task, advice)
             else:
-                state["devops"][task["plan"]] = {"worker": None, "state": "none"}
-                task.pop("devops", None)
-                self.move(task, "ci_failed" if task.get("job") == "triage" else "confirmed", "DevOps restarted")
+                self.devops_back(state, task["plan"], task, "DevOps restarted")
             return {"task": task["id"], "state": task["state"]}
         return self.transact(project, change, "restart")
 
@@ -847,25 +945,32 @@ class Flow:
             self.cancel(state, worker, reason)
         worker["state"] = "cancelled"
 
-    def settle(self, state, worker):
+    def owing(self, state, worker):
+        """The task this worker still owes its closing command for, or None."""
+        if worker["role"] == "devops":
+            return next((t for t in state["tasks"].values() if t["state"] == "merging" and t.get("devops") == worker["id"]),
+                        None)
+        task = state["tasks"].get(worker["task"])
+        owes = {"implementer": "implementing", "reviewer": "reviewing"}[worker["role"]]
+        return task if task and task.get(worker["role"]) == worker["id"] and task["state"] == owes and not task.get("fix") \
+            else None
+
+    def settle(self, state, worker, waits=None):
         """A worker's run ended. One that owes nothing rests (an idle DevOps waits for a follow-up). One that owes its
-        closing command is asked once to finish; the next time, its task is blocked and you are told."""
+        closing command is asked once to finish; the next time, its task is blocked and you are told. One whose run
+        stopped at its model's quota is not asked: a follow-up would stop the same way, so its work goes back."""
         if worker["state"] == "cancelled":
             return
         worker["state"] = "idle"
-        if worker["role"] == "devops":
-            task = next((t for t in state["tasks"].values()
-                         if t["state"] == "merging" and t.get("devops") == worker["id"]), None)
-            if task is None:
-                entry = state["devops"].get(worker["plan"]) or {}
-                if entry.get("worker") == worker["id"]:
-                    entry["state"] = "idle"
-                return
-        else:
-            task = state["tasks"].get(worker["task"])
-            owes = {"implementer": "implementing", "reviewer": "reviewing"}[worker["role"]]
-            if not task or task.get(worker["role"]) != worker["id"] or task["state"] != owes or task.get("fix"):
-                return
+        task = self.owing(state, worker)
+        if worker["ended"].get("quota") and (task or worker["role"] == "devops"):
+            self.put_back(state, worker, task, (waits or {}).get(worker["role"]))
+            return
+        if task is None:
+            entry = (state["devops"].get(worker["plan"]) or {}) if worker["role"] == "devops" else {}
+            if entry.get("worker") == worker["id"]:
+                entry["state"] = "idle"
+            return
         job = worker["job"]
         if job.get("nudged", 0) < NUDGES:
             job["nudged"] = job.get("nudged", 0) + 1
@@ -878,6 +983,27 @@ class Flow:
         self.move(task, "blocked", f"its {worker['role']} ended twice without reporting")
         state["tell"].append(f"{task['task']} ({task['plan']}) is blocked: its {worker['role']} ended twice without "
                              f"reporting. Say restart to give it a new {worker['role']}, or drop it.")
+
+    def put_back(self, state, worker, task, wait):
+        """The worker's run stopped at its model's quota: it goes, and its work goes back to where `next` starts a new
+        worker in its role, on a model with capacity (Jev advises among them); with none, after `wait`."""
+        until, role = worker["ended"]["quota"], worker["role"]
+        self.retire(state, worker, f"{worker['model']} is at its usage limit")
+        why = f"its {role} stopped at {worker['model']}'s usage limit"
+        if role == "devops":
+            self.devops_back(state, worker["plan"], task, why)
+        else:
+            self.move(task, "waiting" if role == "implementer" else "review_needed", why)
+        label = f"{task['task']} ({task['plan']})" if task else f"Plan {worker['plan']}"
+        then = "" if wait else f" A new {'DevOps worker' if role == 'devops' else role} starts on a model with capacity."
+        state["tell"].append(f"{label}: {why}, which resets at {until}.{then}")
+
+    def devops_back(self, state, plan, task, why):
+        """The plan's DevOps worker is gone: a new one starts, and the task it held goes back to wait for it."""
+        state["devops"][plan] = {"worker": None, "state": "none"}
+        if task:
+            task.pop("devops", None)
+            self.move(task, "ci_failed" if task.get("job") == "triage" else "confirmed", why)
 
     def answer(self, project, req):
         """Your answer to a question from `ask`: merge, back or drop for a PR outside its paths; any words for a
@@ -962,7 +1088,7 @@ class Flow:
         return {"control": state["control"], "repo": config["github"]["repo"],
                 "plans": {name: p["status"] for name, p in state["plans"].items()},
                 "dependsOn": {name: p["dependsOn"] for name, p in state["plans"].items() if p["dependsOn"]},
-                "tasks": [{k: t.get(k) for k in ("id", "plan", "task", "state", "after", "unlinked", "needed", "pr", "head")}
+                "tasks": [{k: t.get(k) for k in ("id", "plan", "task", "state", "after", "unlinked", "needed", "pr", "head", "held")}
                           for t in state["tasks"].values()],
                 "working": sorted(w["id"] for w in state["workers"].values() if w["state"] == "working"),
                 "models": {role: role_model(config, state, role) for role in ROLES}, "devops": state.get("devopsOn", True),
@@ -1008,16 +1134,23 @@ class Flow:
         the default. An implementer has no default model: without Jev's answer it starts on the approved one with the
         best scores that T3 runs. The effort is the user's, else the default: Jev sets none, and an effort a task's
         choice kept from an older version is not used. Advice marked "limit" stands in for a model at its usage limit, the
-        user's own included. The worker keeps its model entry, so a later change never reaches a worker already started."""
+        user's own included; without it, the best-scored one with capacity does. The worker keeps its model entry, so a
+        later change never reaches a worker already started."""
         pick = (state.get("picks") or {}).get(role) or {}
         choice = choice or {}
         stand_in = bool(choice.get("limit"))
         advised = choice.get(role) if role in (config["models"].get(choice.get(role)) or {}).get("roles", []) else None
         model = advised if stand_in or not pick.get("model") else None
         source = ("limit" if stand_in else "jev") if model else "default"
-        if not model and not pick.get("model") and role not in config["defaults"]:
+        own, provider = usual(config, state, role)
+        spent = limits_now(state) if not model else {}
+        if not model and (not own or at_limit(spent, own, provider)):
             lists = t3_lists()[0]
-            model, source = best_scored(config, role, lists, t3_limits()) or best_scored(config, role, None), "scores"
+            best = best_scored(config, role, lists, spent) or best_scored(config, role, None)
+            if not own:
+                model, source = best, "scores"
+            elif best and not at_limit(spent, best, config["models"][best]["provider"]):
+                model, source, stand_in, choice = best, "limit", True, {**choice, "limit": own}
         chosen = pick.get("effort")
         if model and stand_in and chosen not in EFFORTS:
             chosen = None  # A level only the user's own model has does not carry to its stand-in.
@@ -1146,9 +1279,9 @@ class Flow:
             fix["detail"], guide, "Then push (opening the PR as your brief says if there is none yet), and run: "
             + command("worker", "pr", me, "--pr", number), "When it succeeds, end your turn."] if line]))
 
-    def call_devops(self, config, state, choice=None):
+    def call_devops(self, config, state, choice=None, held=lambda entry, name: False):
         """One DevOps worker per plan with work for it: started the first time, woken by a follow-up when idle.
-        While a merge runs nobody is called: take would give them nothing."""
+        While a merge runs nobody is called: take would give them nothing. `held` says a new one must wait for a reset."""
         if any(t["state"] == "merging" for t in state["tasks"].values()):
             return
         for name, plan in state["plans"].items():
@@ -1156,7 +1289,7 @@ class Flow:
                     t["plan"] == name and t["state"] in {"confirmed", "ci_failed"} for t in state["tasks"].values()):
                 continue
             entry = state["devops"].setdefault(name, {"worker": None, "state": "none"})
-            if entry["state"] == "none":
+            if entry["state"] == "none" and not held(entry, name):
                 worker = self.add_worker(config, state, "devops", name, None, choice)
                 worker["job"] = {"kind": "devops", "reported": False, "nudged": 0}
                 entry.update(worker=worker["id"], state="working")
@@ -1609,6 +1742,27 @@ class Flow:
             return {"key": key}
         return self.transact(project, change, "merge_woken")
 
+    def reset_wake(self, project):
+        """The watcher's check: whether the orchestrator should run `next` because the quota some work waits for has
+        reset. Once per reset."""
+        config, state = self.load(project)
+        due = sorted(f"{item}@{until}" for item, until in [
+            *((t["id"], t.get("held")) for t in state["tasks"].values() if t["state"] in {"waiting", "review_needed"}),
+            *((f"devops:{name}", entry.get("held")) for name, entry in state["devops"].items() if entry["state"] == "none")]
+            if until and passed(until))
+        key = ",".join(due)
+        if state["control"] != "active" or not due or state.get("resetWoken") == key:
+            return {"send": False}
+        return {"send": True, "key": key, "message": (
+            "use t3 workflow: the usage limit some work waits for has reset. Run t3-workflow '{\"op\":\"next\"}' and "
+            "carry on.")}
+
+    def reset_woken(self, project, key):
+        def change(config, state):
+            state["resetWoken"] = key
+            return {"key": key}
+        return self.transact(project, change, "reset_woken")
+
     def failed(self, project, worker, args):
         cause = args.get("cause")
         require(cause in {"task", "pipeline"}, "--cause is task (the change broke CI) or pipeline (CI itself broke)")
@@ -1739,9 +1893,11 @@ TASK, NEED = '"<task>"', '"<the file you need and what in it>"'
 def implementer_brief(config, state, task, worker):
     branch = config["branch"]
     me = f"--worker {worker['id']} --token {worker['token']}"
-    if task.get("pr"):  # A restart: the work so far is on the PR's branch.
+    if task.get("pr"):  # A restart: the work so far is on the PR's branch, and why it came back, if it did.
+        came_back = (f" It came back because: {task['returned']} Read its comments (gh pr view {task['pr']} --comments) "
+                     "and make sure that is done." if task.get("returned") else "")
         start = (f"PR #{task['pr']} already holds this task's work on branch {task['branch']}. Continue it: "
-                 f"git fetch origin {task['branch']} && git reset --hard origin/{task['branch']}",
+                 f"git fetch origin {task['branch']} && git reset --hard origin/{task['branch']}.{came_back}",
                  f"When the work is done: commit and git push origin HEAD:{task['branch']}.")
     else:
         start = (f"Your checkout is new. Start with: git fetch origin {branch} && git reset --hard origin/{branch}",
@@ -1756,7 +1912,7 @@ def implementer_brief(config, state, task, worker):
         start[0],
         f"Keep this checkout's branch name. Never push to {branch}, never force-push, never merge.",
         start[1],
-        f"Then run: {command('worker', 'pr', me, '--pr', '<number>')}",
+        f"Then run: {command('worker', 'pr', me, '--pr', str(task['pr']) if task.get('pr') else '<number>')}",
         "It runs the project's checks in this folder. If it refuses, fix what it names, push, and run it again. "
         "When it succeeds, end your turn.",
         *filter(None, [waits_line(state, task, me)]),

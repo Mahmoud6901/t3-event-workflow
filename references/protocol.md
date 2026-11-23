@@ -3,8 +3,7 @@
 Every workflow call prints one JSON object: `{"ok": true, ...}`, or `{"ok": false, "error": "..."}`
 with a reason you can act on.
 
-The orchestrator runs `t3-workflow '<JSON>'` from its shell. Its hook adds the project and thread and
-runs [harness.py](../scripts/harness.py).
+The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the project and thread.
 
 ## Orchestrator operations
 
@@ -59,7 +58,7 @@ runs [harness.py](../scripts/harness.py).
 - **ci** off, as when GitHub billing stops Actions: PRs merge on local checks and review, the branch
   requires only `t3/review`, and `freed` tasks go on. On puts back what it removed.
 
-The hook also runs `ended` for each "Delegated task …" notice. You never run it yourself.
+The hook runs `ended` for each "Delegated task …" notice; you never do.
 
 ## Task states
 
@@ -88,7 +87,8 @@ A review asking for changes, a conflict, a failed CI check in the task's code, o
 the task back to its implementer, with a follow-up naming the fix.
 
 **A worker that ends without its closing command** gets one follow-up asking it to finish. If it ends
-that way again, its task is `blocked`, and `tell` says so.
+that way again, its task is `blocked`, and `tell` says so. One stopped at its quota is replaced at
+once on a model with capacity, or its task waits for the reset.
 
 ## Worker commands
 
@@ -114,7 +114,7 @@ A refused command changes nothing. Its error says what to do.
 
 `init` creates a binding, paused; [setup](setup.md#3-bind-it) lists its fields.
 
-Jev picks, per task, an implementer's model left open (it has no default), never an effort; a stand-in at a usage limit. No answer: the best-scored implementer T3 runs, else the defaults.
+Jev picks, per task, an implementer's model left open, never an effort; a stand-in at a usage limit. No answer: the best-scored model with capacity.
 
 **Problems:** `status` lists any background part (watcher scan, its sends, hooks, Jev, GitHub, a
 checkout) that failed three times in a row. A part's next success clears it.

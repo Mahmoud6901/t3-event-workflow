@@ -28,9 +28,16 @@ approved model's [LiveBench 2.0](https://livebench.ai/) scores, from tasks the b
 publish. Without Jev's answer (no key, Jev unreachable, or an invalid reply), the implementer runs on
 the approved model with the best average score that T3 runs. Jev never sets an effort: an
 implementer runs at `xhigh` unless you choose another. Reviewers and DevOps run
-on your choice or the default. One exception: while T3 shows a model's usage limit as spent, Jev
-starts that role's new workers on an approved model of another provider, and they go back to your
-model when the limit resets.
+on your choice or the default. One exception: while a model is at its usage limit, Jev starts that
+role's new workers on an approved model with capacity, and they go back to your model when the limit
+resets.
+
+A limit counts when T3 shows it as spent, or when a worker's run stopped at the model's quota, as
+in "Individual quota reached… Resets in 4h11m25s". That worker is not asked to finish, since it would
+stop the same way. A new one takes over its task at once, on Jev's choice among the models with
+capacity, or on the best-scored of them without Jev's answer. When no model the role can run on has
+capacity, the task waits for the reset, and the watcher wakes the orchestrator to start it then. A
+quota that names no reset is tried again after 30 minutes.
 
 `python scripts/scores.py` refreshes those scores. Jev sees the Coding and Long Agentic suites;
 `--suites coding,long_agentic,browser` adds others (`design`, `research`, `data_analysis`,

@@ -66,8 +66,8 @@ class HookTests(unittest.TestCase):
                 f"m{self.sent}", thread, f"run-{thread}-{run}", "user", f"2026-11-10T00:00:{self.sent:02d}Z",
                 json.dumps({"id": f"m{self.sent}", "role": "user", "createdBy": created_by, "creationSource": source, "text": text})))
 
-    def wake(self, task_id, run=1, status="completed"):
-        self.message(f"Delegated task {task_id} (M30: Fix the login typo) [{status}]:\nDone.", run=run,
+    def wake(self, task_id, run=1, status="completed", body="Done."):
+        self.message(f"Delegated task {task_id} (M30: Fix the login typo) [{status}]:\n{body}", run=run,
                      created_by="agent", source="server")
 
     def hook(self, hook, session=f"sess-{ORCH}", cwd=None, runtime="claude", **data):
@@ -141,6 +141,15 @@ class HookTests(unittest.TestCase):
         self.assertEqual((nudge["tool"], nudge["arguments"]["threadId"]), ("t3_thread_send", "child"))
         self.hook("user_prompt_submit", prompt="Delegated task task-1")
         self.assertEqual([c["call"] for c in self.op("next")["calls"]], [nudge["call"]], "the same end is not news")
+
+    def test_a_wake_notice_of_a_run_stopped_at_its_quota_starts_a_new_implementer_instead_of_asking_it_to_finish(self):
+        self.started()
+        self.wake("task-1", run=2, status="failed", body=(
+            "Antigravity stopped this turn because of an error.\n\nLast assistant message before the run failed:\n\n\n"
+            "⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 4h11m25s.\n"))
+        self.hook("user_prompt_submit", prompt="Delegated task task-1")
+        (fresh,) = self.op("next")["calls"]
+        self.assertEqual(fresh["tool"], "delegate_task", "a follow-up would stop at the same quota")
 
     def test_the_turn_cannot_end_with_calls_unrecorded_or_a_workers_end_unread(self):
         self.message("use t3 workflow: fix the login typo")

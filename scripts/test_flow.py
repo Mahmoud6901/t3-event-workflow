@@ -1,5 +1,6 @@
 """The harness command line (seam 1): a task's whole life in the delegated PR workflow, against a temporary database,
 real git repositories and a fake GitHub."""
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zoneinfo
 
 sys.path.insert(0, str(Path(__file__).parent))
 from unittest.mock import patch  # noqa: E402
@@ -45,6 +47,11 @@ CODEX_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [
               for s in ("gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra")]
 
 SPENT = [{"id": "five_hour", "kind": "session", "usedPercent": 100, "resetsAt": "2999-01-01T00:00:00.000Z"}]
+# The end of a run stopped by its model's quota, as T3's wake notice gives it (2026-11-23).
+QUOTA_STOP = ("Antigravity stopped this turn because of an error.\n\nLast assistant message before the run failed:\n\n\n"
+              "⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 4h11m25s.\n")
+CLAUDE_STOP = ("Claude API rate limit reached. Try again later.\n\nLast assistant message before the run failed:\n\n"
+               "You've hit your 5-hour limit · resets 1:50am (Europe/Berlin)")
 # Scores as scores.py writes them. Astra leads on Coding, but Neon has the best average and Sol the worst.
 SCORES = {"fetched": "2026-11-22", "boards": {"livebench": {
     "label": "LiveBench 2.0", "scale": "0 to 100",
@@ -451,6 +458,130 @@ class FlowTests(unittest.TestCase):
         fresh = [c for c in self.start() if c["tool"] == "delegate_task"]
         self.assertEqual([c["arguments"]["target"]["model"] for c in fresh], ["gpt-6.2-astra"])
         self.assertEqual(self.jev_roles, ["implementer", "implementer"])
+
+    def test_an_implementer_stopped_by_its_models_quota_is_replaced_at_once_on_jevs_choice_among_models_with_capacity(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
+        self.jev_answer["implementer"] = "gemini-4-neon"
+        self.bind()
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.jev_answer["implementer"] = "gpt-6.2-astra"
+        self.end(call, "failed", QUOTA_STOP)
+        (fresh,) = self.start()
+        self.assertEqual(fresh["tool"], "delegate_task", "no follow-up: it would stop at the same quota")
+        self.assertNotEqual(fresh["worker"], call["worker"])
+        self.assertEqual(fresh["arguments"]["target"]["model"], "gpt-6.2-astra")
+        self.assertNotIn("gemini-4-neon", self.jev_models, "Jev chooses among the models with capacity")
+        self.assertTrue(any("Fix the login typo" in line and "gemini-4-neon" in line for line in self.last_step["tell"]),
+                        self.last_step["tell"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
+
+    def test_an_implementer_stopped_by_its_quota_mid_fix_tells_its_successor_why_the_pr_came_back(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
+        self.jev_answer["implementer"] = "gemini-4-neon"
+        _, review, tree = self.to_review()
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "changes",
+                                    "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
+        (fix,) = self.start()
+        self.jev_answer["implementer"] = "gpt-6.2-astra"
+        self.end(fix, "failed", QUOTA_STOP)
+        (fresh,) = self.start()
+        brief = fresh["arguments"]["task"]
+        self.assertEqual(fresh["arguments"]["target"]["model"], "gpt-6.2-astra")
+        self.assertIn("PR #7 already holds this task's work", brief)
+        self.assertIn("It came back because: The reviewer asked for changes on PR #7.", brief)
+        self.assertIn("gh pr view 7 --comments", brief)
+
+    def test_a_reviewer_stopped_by_its_quota_moves_without_jevs_answer_to_the_best_scored_model_with_capacity(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
+        _, review, _ = self.to_review()
+        self.assertEqual(review["arguments"]["target"]["model"], "claude-opus-5-5")
+        self.jev_answer = {}  # No Jev key: Jev never answers.
+        self.end(review, "failed", CLAUDE_STOP)
+        (fresh,) = self.start()
+        self.assertEqual((fresh["tool"], fresh["arguments"]["role"]), ("delegate_task", "review"))
+        self.assertEqual(fresh["arguments"]["target"]["model"], "gemini-4-neon", "the best average with capacity")
+        self.assertIn("claude-opus-5-5 is at its usage limit, so a new reviewer runs on gemini-4-neon until it resets.",
+                      self.last_step["tell"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["reviewing"])
+
+    def test_a_devops_worker_stopped_by_its_quota_is_replaced_and_the_task_it_held_waits_for_the_new_one(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
+        _, review, tree = self.to_review()
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve",
+                                    "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
+        (devops,) = self.start()
+        self.assertEqual(devops["arguments"]["target"]["model"], "claude-sonnet-5-5")
+        self.assertEqual(self.worker("take", *worker_command(devops))["pr"], 7)
+        self.jev_answer["devops"] = "gemini-4-neon"
+        self.end(devops, "failed", CLAUDE_STOP)
+        (fresh,) = self.start()
+        self.assertEqual((fresh["tool"], fresh["arguments"]["role"]), ("delegate_task", "general"))
+        self.assertNotEqual(fresh["worker"], devops["worker"])
+        self.assertEqual(fresh["arguments"]["target"]["model"], "gemini-4-neon")
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["confirmed"], "the new DevOps worker takes it")
+
+    def reset_comes(self):
+        """The time a quota a run stopped at resets comes: its reset, and every wait for it, are behind us now."""
+        past = "2020-01-01T00:00:00+00:00"
+        db = store.connect(self.db)
+        try:
+            with db:
+                state = json.loads(db.execute("SELECT state FROM projects WHERE id=?", (PROJECT,)).fetchone()[0])
+                for limit in (state.get("limits") or {}).values():
+                    limit["until"] = past
+                for item in [*state["tasks"].values(), *state["devops"].values()]:
+                    if item.get("held"):
+                        item["held"] = past
+                db.execute("UPDATE projects SET state=? WHERE id=?", (store.packed(state), PROJECT))
+        finally:
+            db.close()
+
+    def reset_wakes(self):
+        """One watcher pass over the work that waits for a quota to reset. Returns the messages it sent."""
+        import watch
+        sent = []
+        engine = flow.Flow(self.db, hub=lambda repo: self.hub)
+        try:
+            watch.resets(engine, lambda thread, text: sent.append((thread, text)))
+        finally:
+            engine.close()
+        return sent
+
+    def test_with_no_model_left_with_capacity_the_work_waits_for_the_reset_and_the_watcher_wakes_it_then(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage={"codex": SPENT})  # Neon is the only implementer with capacity.
+        self.bind()
+        self.jev_answer["implementer"] = "gemini-4-neon"
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.end(call, "failed", QUOTA_STOP)
+        self.assertEqual(self.start(), [], "no worker starts on a model at its limit")
+        self.assertTrue(any(line.startswith("Fix the login typo (M30) waits until") for line in self.last_step["tell"]),
+                        self.last_step["tell"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["waiting"])
+        self.assertEqual(self.start(), [])
+        self.assertEqual(self.last_step["tell"], [], "the wait is told once")
+        self.assertEqual(self.reset_wakes(), [], "the quota has not reset")
+        self.reset_comes()
+        (wake,) = self.reset_wakes()
+        self.assertEqual(wake[0], ORCH)
+        self.assertTrue(wake[1].startswith("use t3 workflow:"), wake)
+        self.assertEqual(self.reset_wakes(), [], "one wake per reset")
+        (fresh,) = self.start()
+        self.assertEqual((fresh["tool"], fresh["arguments"]["target"]["model"]), ("delegate_task", "gemini-4-neon"))
+        self.assertEqual(self.reset_wakes(), [], "nothing waits now")
+
+    def test_a_task_dropped_while_it_waits_for_a_reset_wakes_nobody(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST, usage={"codex": SPENT})
+        self.bind()
+        self.jev_answer["implementer"] = "gemini-4-neon"
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.end(call, "failed", QUOTA_STOP)
+        self.start()
+        self.assertTrue(self.orchestrator("queue_edit", drop="Fix the login typo")["ok"])
+        self.reset_comes()
+        self.assertEqual(self.reset_wakes(), [])
 
     def test_a_restart_during_a_limit_starts_the_new_worker_on_a_stand_in(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
@@ -1161,9 +1292,9 @@ class FlowTests(unittest.TestCase):
         self.assertIn("Use v2.", fix["arguments"]["message"])
         self.assertIn("--pr <number>", fix["arguments"]["message"])
 
-    def end(self, call, status="completed"):
-        """T3 wakes the orchestrator: the run this call started has ended; its hook records that."""
-        ended = self.orchestrator("ended", taskId=self.runs[call["call"]], status=status)
+    def end(self, call, status="completed", text=None):
+        """T3 wakes the orchestrator: the run this call started has ended; its hook records that, with the notice's text."""
+        ended = self.orchestrator("ended", taskId=self.runs[call["call"]], status=status, **({"text": text} if text else {}))
         self.assertTrue(ended["ok"], ended)
 
     def test_a_worker_that_ends_without_reporting_is_asked_once_then_its_task_is_blocked_until_restarted(self):
@@ -1488,6 +1619,42 @@ class FlowTests(unittest.TestCase):
         result = self.worker("pr", worker, token, "--pr", "7", path=tree)
         self.assertFalse(result["ok"])
         self.assertIn("uncommitted", result["error"])
+
+
+class QuotaTests(unittest.TestCase):
+    """How the end of a failed run, as T3's wake notice gives it, tells a quota from any other failure, and its reset."""
+    AT = datetime(2026, 11, 22, 20, 0, tzinfo=timezone.utc)
+
+    def until(self, text):
+        found = flow.quota_until(text, self.AT)
+        return found and datetime.fromisoformat(found)
+
+    def test_a_quota_that_says_when_it_resets_is_out_until_then(self):
+        self.assertEqual(self.until(QUOTA_STOP), self.AT + timedelta(hours=4, minutes=11, seconds=25))
+        self.assertEqual(self.until("You've hit your usage limit. Upgrade to Pro, or try again in 2 hours 5 minutes."),
+                         self.AT + timedelta(hours=2, minutes=5))
+
+    def test_a_reset_given_as_a_clock_time_is_its_next_one_in_the_zone_it_names(self):
+        until = self.until("Claude API rate limit reached. Try again later.\n\nLast assistant message before the run "
+                           "failed:\n\nYou've hit your 5-hour limit · resets 1:50am (Europe/Berlin)")
+        try:
+            zone = zoneinfo.ZoneInfo("Europe/Berlin")
+        except zoneinfo.ZoneInfoNotFoundError:  # Windows without tzdata: the clock is read in this computer's zone.
+            zone = None
+        self.assertTrue(self.AT < until <= self.AT + timedelta(days=1), until)
+        self.assertEqual(until.astimezone(zone).strftime("%H:%M"), "01:50")
+
+    def test_a_quota_that_names_no_reset_is_tried_again_after_half_an_hour(self):
+        for text in ("Please check your account with your provider to add more credits, then resend your message to continue.",
+                     "Claude API rate limit reached. Try again later."):
+            self.assertEqual(self.until(text), self.AT + timedelta(minutes=30), text)
+
+    def test_any_other_failure_is_no_quota_even_when_the_workers_own_words_name_a_limit(self):
+        for text in ("The provider event stream closed unexpectedly. Retry the turn; if it keeps failing, check the "
+                     "provider and server logs.", "Failed to authenticate. API Error: 403", "Provider turn failed.",
+                     "Claude API unknown. Last assistant message before the run failed: I will add a rate limit to "
+                     "the login route, then a usage limit page that resets in 5 minutes.", "", None):
+            self.assertIsNone(flow.quota_until(text, self.AT), text)
 
 
 if __name__ == "__main__":

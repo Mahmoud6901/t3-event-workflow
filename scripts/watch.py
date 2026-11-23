@@ -4,7 +4,8 @@ While T3 runs, every INTERVAL seconds, it reads T3's database read-only for each
 worker whose T3 run is still going but has not moved for its binding's quietMinutes is told to the user through `next`,
 and the orchestrator gets one message per quiet spell naming it. The orchestrator restarts it only on the user's word.
 A worker whose run ended is not watched: T3 wakes the orchestrator for that. For a plan without DevOps it also wakes
-the orchestrator once per merge step the harness can take (see Flow.merge_wake). Nothing else is sent or changed.
+the orchestrator once per merge step the harness can take (see Flow.merge_wake), and once when a quota some work waits
+for resets (Flow.reset_wake). Nothing else is sent or changed.
 Each project with its own copy (homes.py) has its own watcher, running that copy: the shared one keeps them alive.
 A watcher whose code changed (an upgrade) ends, so the next start runs the new code.
 
@@ -93,12 +94,23 @@ def scan(engine, native, send, now=None):
 def merges(engine, send):
     """For plans without DevOps: the orchestrator is woken when the harness has a merge step to take (a confirmed PR,
     or CI finished on the PR it holds), so its `next` takes it. Returns the projects woken."""
-    woken = []
+    return wake(engine, send, engine.merge_wake, engine.merge_woken, "github")
+
+
+def resets(engine, send):
+    """Work that waits for a quota a worker's run stopped at: the orchestrator is woken once that quota resets, so its
+    `next` starts it. Returns the projects woken."""
+    return wake(engine, send, engine.reset_wake, engine.reset_woken, "scan")
+
+
+def wake(engine, send, check, woken, problem):
+    """Each project whose `check` says so gets its orchestrator woken, and `woken` records it so it happens once."""
+    done = []
     for project, config, state in engine.projects():
         try:
-            result = engine.merge_wake(project)
-        except Exception as error:  # GitHub could not say; the next pass asks again.
-            health.failed(engine.path.parent, "github", f"{type(error).__name__}: {error}")
+            result = check(project)
+        except Exception as error:  # It could not say (GitHub, for merges); the next pass asks again.
+            health.failed(engine.path.parent, problem, f"{type(error).__name__}: {error}")
             continue
         if not result["send"]:
             continue
@@ -108,9 +120,9 @@ def merges(engine, send):
             health.failed(engine.path.parent, "send", f"{type(error).__name__}: {error}")
             continue
         health.ok(engine.path.parent, "send")
-        engine.merge_woken(project, result["key"])
-        woken.append(project)
-    return woken
+        woken(project, result["key"])
+        done.append(project)
+    return done
 
 
 def t3_send(thread_id, text):
@@ -174,6 +186,8 @@ def main():
                             log(f"told the orchestrator {worker} is quiet")
                         for project in merges(engine, t3_send):
                             log(f"woke {project}'s orchestrator for a merge step")
+                        for project in resets(engine, t3_send):
+                            log(f"woke {project}'s orchestrator: a usage limit its work waits for has reset")
                     finally:
                         native.close()
                 finally:
