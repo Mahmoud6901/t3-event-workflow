@@ -1279,6 +1279,55 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(step["calls"], [])
         self.assertIn("Plan M30 done: 0 merged, 1 dropped.", step["tell"])
 
+    def guarded_ask(self, files, **binding):
+        """An approved PR changing files; returns (implementer call, the one ask next puts)."""
+        call, review, tree = self.to_review(files=files, **binding)
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve",
+                                    "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
+        step = self.orchestrator("next")
+        self.assertEqual(step["calls"], [])
+        (ask,) = step["ask"]
+        self.assertEqual(ask["options"], ["merge", "back", "drop"])
+        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["asking"])
+        return call, ask
+
+    def test_a_pr_changing_a_guarded_path_inside_its_own_paths_waits_for_your_answer(self):
+        _, ask = self.guarded_ask(("src/login.ts", "src/db/001_users.sql"), guarded=["src/db/"])
+        self.assertIn("guarded files: src/db/001_users.sql", ask["question"])
+        self.assertNotIn("outside", ask["question"])
+        self.assertEqual(self.status()["guarded"], ["src/db/"])
+        self.assertTrue(self.orchestrator("answer", ask=ask["id"], answer="merge")["ok"])
+        (devops,) = self.start()
+        self.assertEqual(devops["arguments"]["role"], "general")
+
+    def test_a_pr_both_outside_its_paths_and_guarded_gets_one_ask_and_back_names_both(self):
+        call, ask = self.guarded_ask(("src/db/001_users.sql", "package.json"), guarded=["src/db/"])
+        self.assertIn("outside src/: package.json", ask["question"])
+        self.assertIn("guarded files: src/db/001_users.sql", ask["question"])
+        self.assertTrue(self.orchestrator("answer", ask=ask["id"], answer="back")["ok"])
+        (fix,) = self.start()
+        self.assertEqual(fix["arguments"]["threadId"], f"child-{worker_command(call)[0]}")
+        self.assertIn("package.json", fix["arguments"]["message"])
+        self.assertIn("src/db/001_users.sql", fix["arguments"]["message"])
+
+    def test_without_devops_a_guarded_path_waits_for_your_answer_too(self):
+        _, ask = self.guarded_ask(("src/login.ts",), devops=False, guarded=["src/login.ts"])
+        self.assertIn("guarded files: src/login.ts", ask["question"])
+
+    def test_the_user_changes_the_guarded_paths_on_their_word_and_new_approvals_follow_them(self):
+        call, review, tree = self.to_review(files=("src/login.ts", "deploy/app.yml"), owns=("src/", "deploy/"))
+        self.assertEqual(self.status()["guarded"], [], "none by default")
+        self.assertFalse(self.orchestrator("guarded", paths=["deploy/"])["ok"], "it needs the user's own words")
+        self.assertFalse(self.orchestrator("guarded", paths=["../elsewhere/"], authorization="Guard it.")["ok"])
+        changed = self.orchestrator("guarded", paths=["deploy/"], authorization="Guard the deploy folder.")
+        self.assertEqual(changed["guarded"], ["deploy/"], changed)
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve",
+                                    "--sha", git(tree, "rev-parse", "HEAD"))["ok"])
+        (ask,) = self.orchestrator("next")["ask"]
+        self.assertIn("guarded files: deploy/app.yml", ask["question"])
+        self.assertTrue(self.orchestrator("guarded", paths=[], authorization="Guard nothing.")["ok"])
+        self.assertEqual(self.status()["guarded"], [])
+
     def rounds(self, call, review, tree, count, number=7):
         """count reviews in a row ask for changes; the implementer pushes a fix after each but the last. Returns the
         last reviewer call."""

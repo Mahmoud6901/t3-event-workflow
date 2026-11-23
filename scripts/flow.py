@@ -156,6 +156,21 @@ def validate_config(raw):
     return config
 
 
+def guarded_paths(raw):
+    """The guarded paths the user gave, in a plan's `owns` form: a PR that changes a file under one waits for the user's
+    answer before it merges. [] for none."""
+    require(isinstance(raw, list) and all(isinstance(p, str) and p.strip() for p in raw),
+            "guarded lists paths in the project, like a plan's owns; [] for none")
+    paths = [slash(p.strip()) for p in raw]
+    require(all(not p.startswith("/") and not re.match(r"[A-Za-z]:", p) and ".." not in p.split("/") for p in paths),
+            "A guarded path is inside the project, relative to its root")
+    return list(dict.fromkeys(paths))
+
+
+def listed(files, most=10):
+    return ", ".join(files[:most]) + (" and more" if len(files) > most else "")
+
+
 def offered_efforts(model, option):
     """The effort levels T3 offers for one model, from its effort option; [] when it has none."""
     for descriptor in (model.get("capabilities") or {}).get("optionDescriptors") or []:
@@ -500,7 +515,7 @@ class Flow:
         handler = {"control": self.control, "queue_set": self.queue_set, "next": self.next, "done": self.done,
                    "status": self.status, "answer": self.answer, "ended": self.ended, "restart": self.restart,
                    "queue_edit": self.queue_edit, "setup_github": self.setup_github, "pick": self.pick,
-                   "devops": self.devops, "ci": self.ci}.get(op)
+                   "devops": self.devops, "ci": self.ci, "guarded": self.guarded}.get(op)
         require(handler, f"Unknown operation {op}")
         return handler(project, req)
 
@@ -515,8 +530,10 @@ class Flow:
         require(isinstance(picks, dict), "picks maps a role to its model")
         devops = req.get("devops", True)
         require(isinstance(devops, bool), "devops is true (a DevOps worker merges) or false (the harness merges)")
+        guarded = guarded_paths(req.get("guarded") or [])
         lists, why = t3_lists()
         state = new_state()
+        state["guarded"] = guarded
         state["picks"] = {role: pick for role, raw in picks.items()
                           if (pick := settle_pick(role, {}, raw, config["defaults"], lists))}
         state["devopsOn"] = devops
@@ -601,6 +618,17 @@ class Flow:
                           if plan["started"] and plan["status"] != "done" and plan.get("devops", True) != on)
             return {"devops": on, "keep": keep}
         return self.transact(project, change, "devops")
+
+    def guarded(self, project, req):
+        """The user's new list of guarded paths, replacing the old one; [] guards none. It applies to every approval from
+        now on, in running plans too."""
+        paths = guarded_paths(req.get("paths"))
+        text(req.get("authorization"), "authorization (the user's own words)")
+
+        def change(config, state):
+            state["guarded"] = paths
+            return {"guarded": paths}
+        return self.transact(project, change, "guarded")
 
     def ci(self, project, req):
         """The user turns GitHub's CI off, as when GitHub billing stops Actions, or back on. Off, a PR merges on its local
@@ -1044,9 +1072,12 @@ class Flow:
                 if reply == "merge":
                     self.move(task, "confirmed", "you said merge")
                 elif reply == "back":
-                    task["fix"] = {"kind": "note", "detail": (
-                        f"PR #{task['pr']} may change only {', '.join(task['owns'])}. "
-                        f"Take out the changes to {', '.join(ask['outside'])}.")}
+                    outside, guarded = ask.get("outside") or [], ask.get("guarded") or []
+                    task["fix"] = {"kind": "note", "detail": " ".join([
+                        *([f"PR #{task['pr']} may change only {', '.join(task['owns'])}. "
+                           f"Take out the changes to {', '.join(outside)}."] if outside else []),
+                        *([f"PR #{task['pr']} changes guarded files, which the user sent back: {', '.join(guarded)}. "
+                           f"Take out the changes to them."] if guarded else [])])}
                     self.move(task, "implementing", "you sent it back")
                 else:
                     self.drop(state, task, "you dropped it")
@@ -1160,7 +1191,7 @@ class Flow:
                           for t in state["tasks"].values()],
                 "working": sorted(w["id"] for w in state["workers"].values() if w["state"] == "working"),
                 "models": {role: role_model(config, state, role) for role in ROLES}, "devops": state.get("devopsOn", True),
-                "ci": state.get("ciOn", True), "pendingCalls": len(state["calls"]), "openAsks": [a for a in state["asks"].values() if not a.get("answered")],
+                "ci": state.get("ciOn", True), "guarded": state.get("guarded") or [], "pendingCalls": len(state["calls"]), "openAsks": [a for a in state["asks"].values() if not a.get("answered")],
                 "problems": health.problems(self.path.parent, scanning=watcher.running(self.path.parent))}
 
     def unblocked(self, state, task):
@@ -1290,19 +1321,24 @@ class Flow:
                       reviewer_brief(config, task, worker))
 
     def confirm(self, state, task, pr, checks):
-        """The orchestrator's rule: the reviewed commit is the head, CI has not failed, and only the task's paths changed."""
+        """The orchestrator's rule: the reviewed commit is the head, CI has not failed, only the task's paths changed, and
+        no guarded path did."""
         if pr["head"] != task["approvedSha"]:
             task["fix"] = {"kind": "moved", "detail": f"PR #{task['pr']} moved after its approval."}
             self.move(task, "implementing", "head moved after approval")
             return
         outside = [f for f in pr["files"] if not owned(f, task["owns"])]
-        if outside:
+        guarded = [f for f in pr["files"] if owned(f, state.get("guarded") or [])]
+        if outside or guarded:
+            what = [*([f"changes files outside {', '.join(task['owns'])}: {listed(outside)}"] if outside else []),
+                    *([f"changes guarded files: {listed(guarded)}"] if guarded else [])]
             ask_id = next_id(state, "a")
-            state["asks"][ask_id] = {"id": ask_id, "task": task["id"], "kind": "outside", "outside": outside, "question": (
-                f"PR #{task['pr']} ({task['task']}) changes files outside {', '.join(task['owns'])}: {', '.join(outside[:10])}"
-                f"{' and more' if len(outside) > 10 else ''}. Merge it anyway, send it back, or drop it?"),
+            state["asks"][ask_id] = {"id": ask_id, "task": task["id"], "kind": "outside", "outside": outside,
+                                     "guarded": guarded, "question": (
+                f"PR #{task['pr']} ({task['task']}) {' and '.join(what)}. Merge it anyway, send it back, or drop it?"),
                 "options": ["merge", "back", "drop"]}
-            self.move(task, "asking", "files outside the task's paths")
+            self.move(task, "asking", " and ".join(
+                [*(["files outside the task's paths"] if outside else []), *(["guarded files"] if guarded else [])]))
             return
         failed = [name for name, result in checks.items() if result == "failure"]
         if failed and not devops_on(state, task["plan"]):  # Without DevOps every CI failure is the implementer's.

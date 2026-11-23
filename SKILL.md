@@ -22,8 +22,8 @@ waits for the reset and then starts by itself.
 
 A task merges only when all of these hold:
 - the reviewer approved the PR's exact head commit (the `t3/review` status)
-- the orchestrator's rule confirmed it: that commit is still the head, CI has not failed, and only
-  the task's paths changed (otherwise the user decides)
+- the orchestrator's rule confirmed it: that commit is still the head, CI has not failed, only the
+  task's paths changed, and no guarded path did (otherwise the user decides)
 - GitHub's protection on the main branch passes: the required checks and `t3/review` are green on an
   up-to-date branch
 

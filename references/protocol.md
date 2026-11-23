@@ -16,12 +16,13 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
 | answer | `{"op":"answer","ask":"a7","answer":"merge"}` | `task`, `state` |
 | restart | `{"op":"restart","task":"Fix the login typo","authorization":"<the user's words>"}` | `task`, `state` |
 | control | `{"op":"control","action":"activate","authorization":"<the user's words>"}` | `control` |
-| status | `{"op":"status"}` | plans with `dependsOn`, tasks with `after`, each role's model, working workers, open asks, problems |
+| status | `{"op":"status"}` | plans with `dependsOn`, tasks with `after`, each role's model, guarded paths, working workers, open asks, problems |
 | setup_github | `{"op":"setup_github","authorization":"<the user's words>"}` | `repo`, `changed` |
 | models | `{"op":"models","search":"qwen"}` | `providers`, `defaults` (each with `runs`), `models` (each with `provider`, `efforts`) |
 | pick | `{"op":"pick","role":"reviewer","model":"…","effort":"xhigh","authorization":"<the user's words>"}` | `model`, `effort`, each with its source |
 | devops | `{"op":"devops","on":false,"authorization":"<the user's words>"}` | `devops`, `keep` |
 | ci | `{"op":"ci","on":false,"authorization":"<the user's words>"}` | `ci`, `changed`, `freed` |
+| guarded | `{"op":"guarded","paths":["db/migrations/"],"authorization":"<the user's words>"}` | `guarded` |
 
 - **next** returns:
   - `calls`: each one has `call` (its id), `worker`, `tool` (`delegate_task`, `t3_thread_send` or
@@ -40,8 +41,8 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
     nothing. A task's links change only while it is `waiting`, a loop is refused, and taking off a link
     to unfinished work needs `why`.
 - **answer** answers an `ask`:
-  - A PR that changes files outside its task's paths takes `merge`, `back` (to its implementer) or
-    `drop`.
+  - A PR outside its task's paths or under a guarded path takes `merge`, `back` (to its implementer)
+    or `drop`.
   - After 3 review rounds: `carry on`, `restart` (a new implementer, on another model unless the
     implementer's model is picked) or `drop`.
   - A stuck implementer's question takes the user's own words, which are sent to it.
@@ -59,6 +60,7 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
   checks; the watcher wakes you when CI finishes. Every CI failure goes to the implementer.
 - **ci** off, as when GitHub billing stops Actions: PRs merge on local checks and review, the branch
   requires only `t3/review`, and `freed` tasks go on. On puts back what it removed.
+- **guarded** replaces the guarded paths, written as in `owns`; `[]` for none.
 
 The hook runs `ended` for each "Delegated task …" notice; you never do.
 
@@ -71,7 +73,7 @@ The hook runs `ended` for each "Delegated task …" notice; you never do.
 | `review_needed` | A PR commit waits for review | `next` starts a reviewer |
 | `reviewing` | A reviewer reads it | `worker review` |
 | `approved` | `t3/review` is on the reviewed commit | `next` applies the rule below |
-| `asking` | The PR changes files outside its paths, or 3 review rounds asked for changes | Your `answer` |
+| `asking` | The PR changes files outside its paths or under a guarded path, or 3 review rounds asked for changes | Your `answer` |
 | `ci_failed` | CI failed on the approved commit | DevOps triages it |
 | `confirmed` | Ready to merge | `worker take` |
 | `merging` | DevOps holds it (or `next`, without DevOps) | `worker merge`, `worker failed`, `worker update` |
@@ -81,7 +83,8 @@ The hook runs `ended` for each "Delegated task …" notice; you never do.
 
 **The confirmation rule**, which `next` applies to each approved task:
 - If the PR's head is not the reviewed commit, the task goes back to its implementer.
-- If the PR changes files outside the task's paths, the task waits for your answer.
+- If the PR changes files outside the task's paths or under a guarded path, the task waits for your
+  answer.
 - If a required check failed, the task goes to `ci_failed`.
 - Otherwise the task is `confirmed`.
 

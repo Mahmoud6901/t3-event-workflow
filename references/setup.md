@@ -24,7 +24,7 @@ Until the binding exists, your hook does not guard this session. Read and ask; c
   them from the project's instructions or package scripts, and give each `argv` as a list. Do not run
   them now. If none apply, write `noChecksReason` instead, saying why.
 
-## 2. Ask about models and DevOps
+## 2. Ask about models, DevOps and guarded paths
 
 Each role has a default model and effort. The user can choose, for each role, any model their T3 runs,
 any effort it offers, both, or neither. Run `models` the way step 3 runs `init`, with the ids from
@@ -62,6 +62,11 @@ harness, add `"devops":false` to `init`. Without DevOps, the harness brings each
 date with the branch, waits for CI and merges it. Every CI failure goes back to the implementer, which
 asks the user when CI itself is broken. DevOps also fixes the pipeline; the harness does not.
 
+Then ask which paths, if any, are guarded: paths no PR changes without the user's word, such as
+database migrations or deploy configuration. Write them the way a plan's `owns` does, for example
+`db/migrations/`. A PR that changes a file under one waits for the user's answer before it merges, even
+inside its task's paths. Add them to `init` as `"guarded":["db/migrations/"]`, or leave it out for none.
+
 ## 3. Bind it
 
 Run the harness directly; the `t3-workflow` form works only once this thread is the orchestrator.
@@ -97,6 +102,7 @@ In Codex's PowerShell, pipe a here-string instead, and keep the JSON ASCII (writ
 | `quietMinutes` | Minutes before the watcher reports a quiet worker (default 30) |
 | `picks` | The user's model and effort per role, from step 2 |
 | `devops` | `false` merges without a DevOps worker (default `true`), from step 2 |
+| `guarded` | Paths whose changes wait for the user's answer before a merge (default none), from step 2 |
 
 The binding starts paused. If it says the project is already bound, point the user to its orchestrator
 thread and stop. `init` gives the project its own copy of the workflow, with its own data: its hooks,
@@ -127,6 +133,8 @@ Tell the user:
   or go back with "use t3 workflow: back to default for the reviewer"
 - whether DevOps merges, and that "use t3 workflow: turn DevOps off" (or on) changes it for plans that
   start later
+- the guarded paths, if any, and that "use t3 workflow: guard <path>" (or stop guarding it) changes
+  them
 - that when GitHub cannot run CI, as when its billing stops Actions, "use t3 workflow: turn CI off"
   lets PRs merge on their local checks and review, and "turn CI on" brings CI back
 - that the binding is paused, and work starts once they say to activate it
@@ -177,4 +185,4 @@ jobs:
 - The old `<project>-tracks` folders can go once their work is merged or dropped.
 
 A binding's settings are fixed at `init`, except the models and efforts the user chooses, which `pick`
-changes.
+changes, and the guarded paths, which `guarded` changes.

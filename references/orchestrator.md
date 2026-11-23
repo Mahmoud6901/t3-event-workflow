@@ -67,6 +67,7 @@ plan you wrote: what starts now, and what each waiting task builds on.
 | "Use <model> for the reviewer", "max effort for the implementer", "back to default" | `models` for a model, then `pick` with their words as `authorization` |
 | "Turn DevOps off" (or on) | `devops` with their words as `authorization`; plans in `keep` stay as they started |
 | "Turn CI off" (or on) | `ci` with their words as `authorization` |
+| "Guard <path>" (or stop) | `guarded` with the new list and their words as `authorization` |
 | New or changed work | Plan it, then `queue_edit` |
 
 Then run `next` and carry on with step 2 of [every wake](#every-wake).
