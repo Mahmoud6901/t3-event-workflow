@@ -338,6 +338,9 @@ RESETS_IN = re.compile(r"(?:resets?|try again)\s+in\s+([^.;\n]+)", re.IGNORECASE
 SPAN = re.compile(r"(\d+)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])", re.IGNORECASE)
 RESETS_AT = re.compile(r"resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)?\s*(?:\(([\w/+-]+)\))?", re.IGNORECASE)
 QUOTA_WAIT = timedelta(minutes=30)  # A quota that names no reset is tried again after this.
+# A limit of the whole account behind a route, which every model on that route shares: Claude's "You've hit your 5-hour
+# limit" (or weekly), Codex's "You've hit your usage limit". Antigravity's "Individual quota" is one model's alone.
+ACCOUNT = re.compile(r"hit your (?:5-hour|five-hour|weekly|usage) limit", re.IGNORECASE)
 
 
 def quota_until(text, at=None):
@@ -366,13 +369,14 @@ def quota_until(text, at=None):
     return (at + (wait or QUOTA_WAIT)).isoformat(timespec="seconds")
 
 
-def learn(config, state, worker, until):
+def learn(config, state, worker, until, account=False):
     """A run of this worker stopped at its model's quota: that model counts as at its limit on that route (its provider)
-    until `until`. Its other routes keep their own quotas."""
+    until `until`. Its other routes keep their own quotas. An account's limit keeps every model on that route out: its
+    model is "", which at_limit finds in every model's name."""
     entry = worker.get("entry") or config["models"].get(worker["model"]) or {}
-    provider, model = entry.get("provider"), entry.get("model") or worker["model"]
+    provider, model = entry.get("provider"), "" if account else entry.get("model") or worker["model"]
     limits = {key: limit for key, limit in (state.get("limits") or {}).items() if not passed(limit["until"])}
-    state["limits"] = {**limits, f"{model}@{provider}": {"model": model, "provider": provider, "until": until}}
+    state["limits"] = {**limits, f"{model or '*'}@{provider}": {"model": model, "provider": provider, "until": until}}
 
 
 def limits_now(state):
@@ -395,8 +399,8 @@ def out_until(config, state, role, spent, lists):
         able.add((model, provider))
     if not able or any(not at_limit(spent, m, p) for m, p in able):
         return None
-    resets = [limit["until"] for key, limit in (state.get("limits") or {}).items()
-              if (limit.get("model", key), limit["provider"]) in able and not passed(limit["until"])]
+    resets = [limit["until"] for key, limit in (state.get("limits") or {}).items() if not passed(limit["until"])
+              and any(p == limit["provider"] and limit.get("model", key) in m for m, p in able)]
     return min(resets) if resets else None
 
 
@@ -1217,7 +1221,7 @@ class Flow:
                     early = [e for e in state.get("unmatched", []) if e["taskId"] == item["taskId"]]
                     worker["ended"] = {**early[0], "seen": False} if early else None
                     if early and early[0].get("quota"):
-                        learn(config, state, worker, early[0]["quota"])
+                        learn(config, state, worker, early[0]["quota"], early[0].get("account", False))
                     state["unmatched"] = [e for e in state.get("unmatched", []) if e["taskId"] != item["taskId"]]
                 if call["tool"] == "task_cancel":
                     worker["state"] = "cancelled"
@@ -1234,14 +1238,15 @@ class Flow:
         watcher found that the hook missed; late_wake wakes the orchestrator for it."""
         run, status = text(req.get("taskId"), "taskId"), req.get("status") or "completed"
         until = quota_until(req.get("text")) if status != "completed" and isinstance(req.get("text"), str) else None
-        quota = {"quota": until} if until else {}
+        account = bool(until and ACCOUNT.search(req["text"]))
+        quota = {"quota": until, **({"account": True} if account else {})} if until else {}
         quota = {**quota, "late": True} if req.get("late") is True else quota
 
         def change(config, state):
             for worker in state["workers"].values():
                 if run in worker["taskIds"]:
                     if until:
-                        learn(config, state, worker, until)
+                        learn(config, state, worker, until, account)
                     # An older run's end means nothing now, and an end already recorded is not news.
                     new = worker["taskIds"][-1] == run and (worker.get("ended") or {}).get("taskId") != run
                     if new:
@@ -2444,6 +2449,23 @@ class Flow:
         return {"send": True, "key": key, "message": (
             "use t3 workflow: workers finished, and the workflow had missed T3's notices of it; they are recorded now. "
             "Run t3-workflow '{\"op\":\"next\"}' and carry on.")}
+
+    def stall_wake(self, project, run):
+        """The watcher's check: the orchestrator's own turn `run` stopped at its usage limit, which has reset, and work
+        waits for its `next` (a worker's end no `next` acted on, or calls from next not yet made). Once per such turn."""
+        config, state = self.load(project)
+        owed = state["calls"] or any(w.get("ended") and not w["ended"].get("seen") for w in state["workers"].values())
+        if state["control"] != "active" or not run or not owed or state.get("stallWoken") == run:
+            return {"send": False}
+        return {"send": True, "key": run, "message": (
+            "use t3 workflow: the usage limit your last turn stopped at has reset, and work waits for you. Run "
+            "t3-workflow '{\"op\":\"next\"}' and carry on.")}
+
+    def stall_woken(self, project, key):
+        def change(config, state):
+            state["stallWoken"] = key
+            return {"key": key}
+        return self.transact(project, change, "stall_woken")
 
     def late_woken(self, project, key):
         def change(config, state):

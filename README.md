@@ -57,7 +57,13 @@ in "Individual quota reached… Resets in 4h11m25s". It holds for that route alo
 asked to finish, since it would stop the same way. A new one takes over its task at once, on the
 model's next route or on Jev's choice among the models with capacity. When no model the role can run
 on has capacity, the task waits for the reset, and the watcher wakes the orchestrator to start it
-then. A quota that names no reset is tried again after 30 minutes.
+then. A quota that names no reset is tried again after 30 minutes. An account's limit, such as
+Claude's "You've hit your 5-hour limit", keeps every model on that route out, not only the one that
+hit it.
+
+The orchestrator can stop at the same limit, when it runs on the same account as the workers. Then it
+takes no step until the limit resets, and the watcher wakes it then. To switch workers to another
+model while a limit holds, run the orchestrator on a model of another provider.
 
 ```bash
 uv tool install git+https://github.com/Mahmoud6901/t3-event-workflow

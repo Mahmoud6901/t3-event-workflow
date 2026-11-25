@@ -7,9 +7,10 @@ piece of work; when the replacement goes quiet too, its task is blocked for the 
 binding replaces nobody: the quiet worker is only told to the user.
 A worker whose run ended is not watched: T3 wakes the orchestrator for that, and its hook records the end. An end the
 hook missed (T3 reworded its notice, say) is recorded once its notice is LATE old, and the orchestrator is woken once
-for it (Flow.late_wake). For a plan without DevOps it also wakes the orchestrator once per merge step the harness can
-take (see Flow.merge_wake), and once when a quota some work waits for resets (Flow.reset_wake). Nothing else is sent or
-changed.
+for it (Flow.late_wake). An orchestrator whose own turn stopped at its usage limit is woken once that limit resets,
+when work waits for it (Flow.stall_wake). For a plan without DevOps it also wakes the orchestrator once per merge step
+the harness can take (see Flow.merge_wake), and once when a quota some work waits for resets (Flow.reset_wake). Nothing
+else is sent or changed.
 Each project with its own copy (homes.py) has its own watcher, running that copy: the shared one keeps them alive.
 A watcher whose code changed (an upgrade) ends, so the next start runs the new code.
 
@@ -134,6 +135,28 @@ def lates(engine, send):
     return wake(engine, send, engine.late_wake, engine.late_woken, "scan")
 
 
+def stopped_turn(native, thread_id, now):
+    """The orchestrator's latest turn, when it failed at a usage limit that has since reset: its run id, else None.
+    Its own model can share a quota with workers (one Claude account, say), so it stops when they do."""
+    run = native.execute("SELECT run_id, status, requested_at FROM orchestration_v2_projection_runs WHERE thread_id=? "
+                         "ORDER BY requested_at DESC LIMIT 1", (thread_id,)).fetchone()
+    if not run or run[1] != "failed" or not run[2]:
+        return None
+    last = native.execute("SELECT created_at, payload_json FROM orchestration_v2_projection_messages WHERE thread_id=? "
+                          "AND role='assistant' AND created_at>=? ORDER BY created_at DESC LIMIT 1", (thread_id, run[2])).fetchone()
+    until = flow.quota_until(json.loads(last[1]).get("text"), at=instant(last[0])) if last else None
+    return run[0] if until and instant(until) <= now else None
+
+
+def stalls(engine, native, send, now=None):
+    """An orchestrator whose own turn stopped at its usage limit is woken once that limit resets, when work waits for
+    its `next`. Returns the projects woken."""
+    now = now or datetime.now(timezone.utc)
+    runs = {project: stopped_turn(native, config["orchestrator"], now)
+            for project, config, _ in engine.projects() if config.get("orchestrator")}
+    return wake(engine, send, lambda project: engine.stall_wake(project, runs.get(project)), engine.stall_woken, "scan")
+
+
 def merges(engine, send):
     """For plans without DevOps: the orchestrator is woken when the harness has a merge step to take (a confirmed PR,
     or CI finished on the PR it holds), so its `next` takes it. Returns the projects woken."""
@@ -231,6 +254,8 @@ def main():
                             log(f"recorded the end of {worker}'s run, which the hook missed")
                         for project in lates(engine, t3_send):
                             log(f"woke {project}'s orchestrator for workers' ends recorded late")
+                        for project in stalls(engine, native, t3_send):
+                            log(f"woke {project}'s orchestrator: the usage limit its own turn stopped at has reset")
                         for project in merges(engine, t3_send):
                             log(f"woke {project}'s orchestrator for a merge step")
                         for project in resets(engine, t3_send):

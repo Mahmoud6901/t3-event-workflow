@@ -880,6 +880,19 @@ class FlowTests(unittest.TestCase):
         self.assertIn("claude-sonnet-5-5 is at its usage limit, so a new DevOps runs on gemini-4-neon until it resets.",
                       self.last_step["tell"])
 
+    def test_claudes_5_hour_limit_a_worker_stopped_at_keeps_every_model_on_that_route_out(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST)
+        call, review, tree = self.to_review()
+        self.assertEqual(call["arguments"]["target"]["providerInstanceId"], "claudeAgent")
+        self.end(call, "failed", CLAUDE_STOP)  # The account's limit, which Sonnet shares with Opus.
+        head = git(tree, "rev-parse", "HEAD")
+        self.assertTrue(self.worker("review", *worker_command(review), "--verdict", "approve", "--sha", head)["ok"])
+        self.jev_answer["devops"] = "gemini-4-neon"
+        (devops,) = self.start()
+        self.assertEqual(devops["arguments"]["target"]["model"], "gemini-4-neon")
+        self.assertIn("claude-sonnet-5-5 is at its usage limit, so a new DevOps runs on gemini-4-neon until it resets.",
+                      self.last_step["tell"])
+
     def test_an_effort_the_user_sets_alone_holds_and_the_model_stays_the_default(self):
         self.bind(picks={"implementer": {"effort": "max"}})
         self.orchestrator("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
@@ -2363,17 +2376,26 @@ class FlowTests(unittest.TestCase):
         {"id": "effort", "options": levels(*CLAUDE_EFFORTS)}]}}]
 
     def test_a_lead_stopped_at_its_quota_is_replaced_at_once_by_a_stand_in_on_opus(self):
-        self.t3_caches(claude=CLAUDE_LIST + self.FABLE)
+        self.t3_caches(claude=CLAUDE_LIST + self.FABLE, antigravity=ANTIGRAVITY_LIST)
         lead = self.to_spec()
         self.assertEqual(lead["arguments"]["target"]["model"], "claude-fable-5-2")
         self.end(lead, "failed", CLAUDE_STOP)
         (fresh,) = self.start()
-        self.assertEqual((fresh["tool"], fresh["arguments"]["target"]["model"]), ("delegate_task", "claude-opus-5-5"))
+        self.assertEqual((fresh["tool"], fresh["arguments"]["target"]["providerInstanceId"], fresh["arguments"]["target"]["model"]),
+                         ("delegate_task", "antigravity", "claude-opus-5-5"), "Claude's 5-hour limit keeps Opus out there too")
         self.assertIn("lead", self.jev_roles, "Jev is asked for the stand-in")
         self.assertIn("claude-fable-5-2 is at its usage limit, so a new lead runs on claude-opus-5-5 until it resets.",
                       self.last_step["tell"])
-        self.assertEqual(self.last_done["tell"], ["Lead for plan M31 started on claude-opus-5-5 at high (a stand-in for "
-                                                  "claude-fable-5-2)."])
+        self.assertEqual(self.last_done["tell"], ["Lead for plan M31 started on claude-opus-5-5 through Antigravity at high "
+                                                  "(a stand-in for claude-fable-5-2)."])
+
+    def test_a_lead_whose_only_account_is_at_its_limit_waits_for_the_reset(self):
+        self.t3_caches(claude=CLAUDE_LIST + self.FABLE)
+        lead = self.to_spec()
+        self.end(lead, "failed", CLAUDE_STOP)
+        self.assertEqual(self.start(), [], "every model on the Claude account is out")
+        self.assertTrue(any("The spec of plan M31 waits until" in line and "every model its lead could run on is at its "
+                            "usage limit" in line for line in self.last_step["tell"]), self.last_step["tell"])
 
     def test_the_lead_has_its_own_model_setting_which_models_status_and_pick_show(self):
         self.t3_caches(claude=CLAUDE_LIST + self.FABLE)

@@ -151,6 +151,47 @@ class WatchTests(unittest.TestCase):
         self.op("ended", taskId="task-1", status="completed")
         self.assertEqual(self.repair(41), ([], []))
 
+    def stopped(self, minutes, words="⚠ Individual quota reached. Resets in 1h10m."):
+        """The orchestrator's own turn failed at START + minutes, ending on `words` (by default its model's quota)."""
+        with closing(sqlite3.connect(self.native_path)) as db, db:
+            db.execute("INSERT INTO orchestration_v2_projection_runs VALUES ('run-orch-2', ?, 'failed', ?)", (ORCH, at(minutes)))
+            db.execute("INSERT INTO orchestration_v2_projection_messages VALUES (?, 'assistant', ?, ?, ?)",
+                       (ORCH, at(minutes), at(minutes), json.dumps({"role": "assistant", "text": words})))
+
+    def stalls(self, minutes):
+        """One pass's check of the orchestrator's own stopped turn: the projects woken."""
+        engine = flow.Flow(self.db)
+        native = sqlite3.connect(self.native_path)
+        try:
+            return watch.stalls(engine, native, lambda thread, text: self.sent.append((thread, text)),
+                                now=START + timedelta(minutes=minutes))
+        finally:
+            native.close()
+            engine.close()
+
+    def test_an_orchestrator_stopped_at_its_own_limit_is_woken_once_it_resets_when_work_waits(self):
+        self.op("ended", taskId="task-1", status="completed")  # The hook recorded it; the orchestrator's turn then failed.
+        self.stopped(30)
+        self.assertEqual(self.stalls(60), [], "its limit has not reset yet")
+        self.assertEqual(self.stalls(101), [PROJECT])
+        ((thread, text),) = self.sent
+        self.assertEqual(thread, ORCH)
+        self.assertIn("use t3 workflow", text)
+        self.assertIn('{"op":"next"}', text)
+        self.assertEqual(self.stalls(110), [], "once per stopped turn")
+        (nudge,) = self.op("next")["calls"]
+        self.assertEqual(nudge["tool"], "t3_thread_send", "next acts on the end it could not act on before")
+
+    def test_a_stopped_turn_with_no_work_waiting_or_not_stopped_at_a_limit_wakes_nobody(self):
+        self.stopped(30)
+        self.assertEqual(self.stalls(101), [], "nothing waits for next")
+        self.op("ended", taskId="task-1", status="completed")
+        with closing(sqlite3.connect(self.native_path)) as db, db:
+            db.execute("DELETE FROM orchestration_v2_projection_messages WHERE role='assistant'")
+        self.stopped(40, words="The provider session closed unexpectedly.")
+        self.assertEqual(self.stalls(200), [], "a turn that failed for another reason is T3's to resume")
+        self.assertEqual(self.sent, [])
+
     def test_a_failed_send_is_tried_again_on_each_pass_and_keeps_failing_into_a_problem(self):
         down = MagicMock(side_effect=OSError("T3 refused"))
         for minutes in (40, 41, 42):
