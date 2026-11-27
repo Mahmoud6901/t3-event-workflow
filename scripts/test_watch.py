@@ -36,7 +36,7 @@ class WatchTests(unittest.TestCase):
         self.op("control", action="activate", authorization="Go.")
         self.op("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])
         (call,) = self.op("next")["calls"]
-        self.worker = call["worker"]
+        self.worker, self.target = call["worker"], call["arguments"]["target"]
         self.op("done", results=[{"call": call["call"], "taskId": "task-1", "childThreadId": "child"}])
         self.native_path = root / "native.sqlite"
         with closing(sqlite3.connect(self.native_path)) as db, db:
@@ -132,6 +132,15 @@ class WatchTests(unittest.TestCase):
         self.assertEqual(self.repair(45), ([], []), "recorded once, woken once")
         (nudge,) = self.op("next")["calls"]
         self.assertEqual(nudge["tool"], "t3_thread_send", "next acts on the end: the implementer has not reported")
+
+    def test_a_late_end_at_a_quota_is_read_from_when_its_notice_was_written_not_from_when_it_is_recorded(self):
+        # The notice is from 2026-11-10, so its "resets 8:10am" is long past: read from today, it would be tomorrow's.
+        self.ended(30, "Delegated task task-1 (M30: Fix the login typo) in child thread child [failed]:\n"
+                       "You've hit your 5-hour limit · resets 8:10am")
+        self.assertEqual(self.repair(41), ([self.worker], [PROJECT]))
+        (fresh,) = self.op("next")["calls"]
+        self.assertEqual(fresh["tool"], "delegate_task", "its run stopped at a quota: no follow-up")
+        self.assertEqual(fresh["arguments"]["target"], self.target, "the account's limit reset long ago: no stand-in")
 
     def test_a_late_end_next_already_acted_on_wakes_nobody(self):
         self.ended(30)

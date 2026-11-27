@@ -315,13 +315,19 @@ def t3_limits():
     return spent
 
 
-def passed(moment):
-    """Whether a time T3 wrote is behind us. One that cannot be read is not: a full window with no clear reset counts."""
+def instant(moment):
+    """A time T3 wrote, as a moment; None when it cannot be read."""
     try:
         at = datetime.fromisoformat(str(moment).replace("Z", "+00:00"))
     except ValueError:
-        return False
-    return (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) <= datetime.now(timezone.utc)
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def passed(moment):
+    """Whether a time T3 wrote is behind us. One that cannot be read is not: a full window with no clear reset counts."""
+    at = instant(moment)
+    return at is not None and at <= datetime.now(timezone.utc)
 
 
 def at_limit(spent, model, provider):
@@ -345,7 +351,8 @@ ACCOUNT = re.compile(r"hit your (?:5-hour|five-hour|weekly|usage) limit", re.IGN
 
 def quota_until(text, at=None):
     """When the quota a failed run stopped at resets (ISO, UTC), read from the end T3's wake notice gives; None when the
-    run did not stop at a quota. A clock time is read in the zone the message names, else this computer's."""
+    run did not stop at a quota. A clock time is read in the zone the message names, else this computer's. `at` is when
+    the notice was written: "in 4h" and "8:10am" count from then, so a notice read late can name a reset already past."""
     if not QUOTA.search(text or ""):
         return None
     at = at or datetime.now(timezone.utc)
@@ -1234,10 +1241,14 @@ class Flow:
     def ended(self, project, req):
         """A worker's T3 run ended (the hook reads it from the "Delegated task …" wake, with the notice's text). `next`
         acts on it. An end that arrives before `done` recorded its run waits for it. A failed run that stopped at its
-        model's quota is learned: that model counts as at its limit until the quota resets. A late end is one the
-        watcher found that the hook missed; late_wake wakes the orchestrator for it."""
+        model's quota is learned: that model counts as at its limit until the quota resets. The reset is read from
+        `at`, when T3 wrote the notice (else now): a notice read after its reset ("resets 8:10am", read at 08:25) names a
+        limit that is over, so nothing is learned from it, where it once kept the model out until the next day. Its
+        work still goes back. A late end is one the watcher found that the hook missed; late_wake wakes the orchestrator
+        for it."""
         run, status = text(req.get("taskId"), "taskId"), req.get("status") or "completed"
-        until = quota_until(req.get("text")) if status != "completed" and isinstance(req.get("text"), str) else None
+        until = (quota_until(req.get("text"), instant(req.get("at")))
+                 if status != "completed" and isinstance(req.get("text"), str) else None)
         account = bool(until and ACCOUNT.search(req["text"]))
         quota = {"quota": until, **({"account": True} if account else {})} if until else {}
         quota = {**quota, "late": True} if req.get("late") is True else quota
@@ -1245,7 +1256,7 @@ class Flow:
         def change(config, state):
             for worker in state["workers"].values():
                 if run in worker["taskIds"]:
-                    if until:
+                    if until and not passed(until):
                         learn(config, state, worker, until, account)
                     # An older run's end means nothing now, and an end already recorded is not news.
                     new = worker["taskIds"][-1] == run and (worker.get("ended") or {}).get("taskId") != run
@@ -1401,7 +1412,7 @@ class Flow:
             self.move(task, "review_needed" if role == "reviewer" else "waiting", why)
         label = f"{task['task']} ({task['plan']})" if task else f"Plan {worker['plan']}"
         then = "" if wait else f" A new {NAMES.get(role, role)} starts on a model with capacity."
-        state["tell"].append(f"{label}: {why}, which resets at {until}.{then}")
+        state["tell"].append(f"{label}: {why}, which {'reset' if passed(until) else 'resets'} at {until}.{then}")
 
     def devops_back(self, state, plan, task, why):
         """The plan's DevOps worker is gone: a new one starts, and the task it held goes back to wait for it."""

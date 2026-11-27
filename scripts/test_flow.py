@@ -743,6 +743,22 @@ class FlowTests(unittest.TestCase):
                         self.last_step["tell"])
         self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
 
+    def test_a_quota_notice_read_after_its_reset_puts_the_work_back_and_keeps_the_model_in(self):
+        self.t3_caches(antigravity=ANTIGRAVITY_LIST[:1])  # Opus runs here through Claude alone.
+        self.bind()
+        self.queue("Fix the login typo")
+        (call,) = self.start()
+        self.jev_answer["implementer"] = "gpt-6.2-astra"
+        written = datetime.now(timezone.utc) - timedelta(hours=25)  # Its "resets 1:50am" came within the day after.
+        self.end(call, "failed", CLAUDE_STOP, at=written.isoformat(timespec="milliseconds").replace("+00:00", "Z"))
+        (fresh,) = self.start()
+        self.assertEqual(fresh["tool"], "delegate_task", "its run still stopped at a quota: no follow-up")
+        self.assertNotEqual(fresh["worker"], call["worker"])
+        self.assertEqual(fresh["arguments"]["target"]["model"], "claude-opus-5-5", "that limit reset before the notice was read")
+        self.assertEqual(getattr(self, "jev_roles", []), [], "no stand-in: the account is not at its limit")
+        self.assertTrue(any("Fix the login typo" in line and "which reset at" in line for line in self.last_step["tell"]),
+                        self.last_step["tell"])
+
     def test_an_implementer_stopped_by_its_quota_mid_fix_tells_its_successor_why_the_pr_came_back(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST[:1])  # Opus runs here through Claude alone.
         _, review, tree = self.to_review()
@@ -1776,9 +1792,11 @@ class FlowTests(unittest.TestCase):
         self.assertIn("Use v2.", fix["arguments"]["message"])
         self.assertIn("--pr <number>", fix["arguments"]["message"])
 
-    def end(self, call, status="completed", text=None):
-        """T3 wakes the orchestrator: the run this call started has ended; its hook records that, with the notice's text."""
-        ended = self.orchestrator("ended", taskId=self.runs[call["call"]], status=status, **({"text": text} if text else {}))
+    def end(self, call, status="completed", text=None, at=None):
+        """T3 wakes the orchestrator: the run this call started has ended; its hook records that, with the notice's text
+        (and, with `at`, when T3 wrote the notice)."""
+        ended = self.orchestrator("ended", taskId=self.runs[call["call"]], status=status, **({"text": text} if text else {}),
+                                  **({"at": at} if at else {}))
         self.assertTrue(ended["ok"], ended)
 
     def test_a_worker_that_ends_without_reporting_is_asked_once_then_its_task_is_blocked_until_restarted(self):

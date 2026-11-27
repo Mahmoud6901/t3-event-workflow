@@ -112,9 +112,13 @@ class Native:
 
     def run_messages(self, thread_id, run_id):
         """Every user-role message of the turn, oldest first: T3 adds a finished child's notice to a running turn."""
-        return [json.loads(p) for (p,) in self.db.execute(
-            "SELECT payload_json FROM orchestration_v2_projection_messages WHERE run_id=? AND thread_id=? AND role='user' "
-            "ORDER BY created_at, message_id", (run_id, thread_id))]
+        return [message for _, message in self.run_written(thread_id, run_id)]
+
+    def run_written(self, thread_id, run_id):
+        """run_messages, each with when T3 wrote it: [(created_at, message)]."""
+        return [(created, json.loads(p)) for created, p in self.db.execute(
+            "SELECT created_at, payload_json FROM orchestration_v2_projection_messages WHERE run_id=? AND thread_id=? "
+            "AND role='user' ORDER BY created_at, message_id", (run_id, thread_id))]
 
 
 def deny(reason):
@@ -207,13 +211,15 @@ def orchestrator_tool(config, thread_id, tool, tool_input, runtime="claude"):
 
 
 def wakes(native, thread_id, prompt=None):
-    """{T3 task id: (status, the notice's text)} for each "Delegated task …" notice in this turn (and the prompt being
-    submitted). The text is how the run ended, a quota it stopped at included."""
+    """{T3 task id: (status, the notice's text, when T3 wrote it)} for each "Delegated task …" notice in this turn (and
+    the prompt being submitted, written now: None). The text is how the run ended, a quota it stopped at included; a
+    reset it names counts from when it was written, which can be well before this turn reads it."""
     run_id = native.active_run(thread_id)
     found = {}
-    for message in (native.run_messages(thread_id, run_id) if run_id else []):
-        found.update(notices.of(message))
-    found.update(notices.read(prompt))
+    for written, message in (native.run_written(thread_id, run_id) if run_id else []):
+        found.update({task: (*notice, written) for task, notice in notices.of(message).items()})
+    for task, notice in notices.read(prompt).items():
+        found.setdefault(task, (*notice, None))  # The same notice as a message of the turn keeps the time T3 gave it.
     return found
 
 
@@ -224,8 +230,9 @@ def record_wakes(config, found):
     import flow
     engine = flow.Flow(HARNESS_DB)
     try:
-        new = sum(1 for task_id, (status, words) in found.items()
-                  if engine.ended(config["projectId"], {"taskId": task_id, "status": status, "text": words}).get("new"))
+        new = sum(1 for task_id, (status, words, written) in found.items()
+                  if engine.ended(config["projectId"], {"taskId": task_id, "status": status, "text": words,
+                                                        **({"at": written} if written else {})}).get("new"))
     finally:
         engine.close()
     TRACE.append(f"wakes {sorted(found)}: {new} new")

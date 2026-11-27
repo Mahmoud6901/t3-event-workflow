@@ -123,8 +123,8 @@ def repair(engine, native, now=None):
             found = notice(native, config["orchestrator"], task)
             if not found or now - instant(found[2]) < LATE:
                 continue
-            status, words, _ = found
-            if engine.ended(project, {"taskId": task, "status": status, "text": words, "late": True}).get("new"):
+            status, words, written = found
+            if engine.ended(project, {"taskId": task, "status": status, "text": words, "at": written, "late": True}).get("new"):
                 recorded.append(worker["id"])
     return recorded
 

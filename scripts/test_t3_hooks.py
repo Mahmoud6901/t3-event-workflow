@@ -91,6 +91,7 @@ class HookTests(unittest.TestCase):
         self.assertTrue(self.op("queue_set", plans=[{"plan": "M30", "owns": ["src/"], "tasks": [{"task": "Fix the login typo"}]}])["ok"])
         (call,) = self.op("next")["calls"]
         self.assertTrue(self.op("done", results=[{"call": call["call"], "taskId": "task-1", "childThreadId": "child"}])["ok"])
+        return call
 
     def test_sessions_outside_t3_the_workspace_or_the_orchestrator_are_left_alone(self):
         self.message("use t3 workflow: fix the login typo")
@@ -154,6 +155,15 @@ class HookTests(unittest.TestCase):
         self.hook("user_prompt_submit", prompt="Delegated task task-1")
         (fresh,) = self.op("next")["calls"]
         self.assertEqual(fresh["tool"], "delegate_task", "a follow-up would stop at the same quota")
+
+    def test_a_quota_notice_read_after_its_reset_keeps_the_model_in(self):
+        call = self.started()
+        # T3 wrote the notice on 2026-11-10, so its "resets 8:10am" is long past: read from today, it would be tomorrow's.
+        prompt = self.wake("task-1", run=2, status="failed", body="You've hit your 5-hour limit · resets 8:10am")
+        self.hook("user_prompt_submit", prompt=prompt)
+        (fresh,) = self.op("next")["calls"]
+        self.assertEqual(fresh["tool"], "delegate_task", "its run stopped at a quota: no follow-up")
+        self.assertEqual(fresh["arguments"]["target"], call["arguments"]["target"], "the account's limit reset long ago")
 
     def test_a_notice_in_t3s_earlier_wording_is_read_too(self):
         self.started()
