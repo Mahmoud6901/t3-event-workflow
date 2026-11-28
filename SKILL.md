@@ -12,18 +12,19 @@ back. Everything else runs in the background, as T3 delegated tasks the orchestr
 |---|---|---|
 | Orchestrator | Plans with the user, makes the harness's calls, reports | Any Claude or Codex model, picked by the user in T3 |
 | Lead | Reads the project, writes a spec and splits it into tasks; the user approves it before any task starts. It edits nothing | The user's choice, else Fable 5.2, `high` |
-| Implementer | One task in its own T3 checkout, ending in one PR | The user's choice, else Opus 5.5, `xhigh` |
+| Implementer | One task in its own T3 checkout, ending in one PR | The user's choice, else Opus 5.5 and Gemini 4 Neon taking turns (the one with fewer unfinished tasks), `xhigh` |
 | Reviewer | Reads the PR at one commit, tries the change, and approves it or asks for changes | The user's choice, else GPT-6.2 Astra, `xhigh` |
 | DevOps | One per plan: updates and squash-merges confirmed PRs, triages CI, owns the pipeline. The user can turn it off; then the harness merges | The user's choice, else Sonnet 5.5, `high` |
-| Docs worker | One per finished plan with merged work: updates the README, an existing changelog and the binding's docs paths in one PR, or ends with no PR when nothing needs it. The user can turn it off | The user's choice, else Gemini 4 Neon, `high` |
+| Docs worker | One per finished plan with merged work: updates the README, an existing changelog and the binding's docs paths in one PR, or ends with no PR when nothing needs it. The user can turn it off | The user's choice, else Gemini 4 Carbon (paid through OpenRouter), `high` |
 
 A reviewer whose model is of the same family (maker) as the model that wrote its PR runs instead on the
 best-scored approved reviewer of another family that can run, over the user's choice too.
 
 Only a model with an ability card (`assets/cards.json`) is approved. A model may have several routes
 (Opus: Claude, Antigravity, then goose); a worker starts on the first with capacity, at the nearest
-effort it offers. Paid goose routes are offered only while no subscription route has capacity.
-While a model has no route with capacity (T3 shows it spent, or a run stopped at its quota), Jev starts
+effort it offers. Paid goose routes are offered only while no subscription route has capacity, except
+for a default that runs only on goose (the docs worker's Gemini 4 Carbon). When one of the implementer
+pair cannot start, the other takes its turn. While a model has no route with capacity (T3 shows it spent, or a run stopped at its quota), Jev starts
 that role's new workers on an approved model with capacity, over the user's choice too, until the limit
 resets. Without Jev's answer, the best-scored one does. A worker stopped at its quota is replaced at
 once; with no model left with capacity, its task waits for the reset and then starts by itself.
@@ -35,8 +36,10 @@ A task merges only when all of these hold:
 - GitHub's protection on the main branch passes: the required checks and `t3/review` are green on an
   up-to-date branch
 
-A task whose reviewer asked for changes 3 times waits for the user: it carries on with its implementer,
-restarts with a new one, or is dropped.
+A task whose reviewer asked for changes 3 times goes, once, to a new implementer on Gemini 4 Carbon
+(paid through OpenRouter), when the user chose no implementer model and Carbon can start. Otherwise, and
+after 3 more, it waits for the user: it carries on with its implementer, restarts with a new one, or is
+dropped.
 
 [harness.py](scripts/harness.py) owns every transition, and the binding lives in `state/`. Finished
 workers wake the orchestrator. One background process runs: the watcher, which notices workers that

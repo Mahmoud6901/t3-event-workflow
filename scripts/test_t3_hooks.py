@@ -163,7 +163,13 @@ class HookTests(unittest.TestCase):
         self.hook("user_prompt_submit", prompt=prompt)
         (fresh,) = self.op("next")["calls"]
         self.assertEqual(fresh["tool"], "delegate_task", "its run stopped at a quota: no follow-up")
-        self.assertEqual(fresh["arguments"]["target"], call["arguments"]["target"], "the account's limit reset long ago")
+        self.assertIn(fresh["arguments"]["target"]["model"], flow.PAIR, "the account's limit reset long ago: no stand-in")
+        self.assertIn(call["arguments"]["target"]["model"], flow.PAIR)
+        engine = flow.Flow(self.db)
+        try:
+            self.assertFalse(engine.load(PROJECT)[1].get("limits"), "a reset already past is not learned")
+        finally:
+            engine.close()
 
     def test_a_notice_in_t3s_earlier_wording_is_read_too(self):
         self.started()

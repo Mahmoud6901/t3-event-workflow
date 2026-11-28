@@ -22,8 +22,9 @@ OPERATIONS = [SCRIPTS / name for name in ("harness.py", "flow.py")]
 ROLE_DOCS = {**t3_hooks.ROLE_DOCS, "implementer": ("implementer.md",), "reviewer": ("reviewer.md",), "devops": ("devops.md",),
              "lead": ("lead.md",), "docs": ("docs.md",)}
 # About 5% over 2026-11-10; raised 2026-11-23. The orchestrator's rose by 490 for the lead (spec, submit), after its
-# planning text moved to lead.md, by 260 for the one-task rule (noSpec), and by 430 for the docs worker (docs, unchanged).
-BUDGET = {"orchestrator": 16110, "implementer": 2700, "reviewer": 2080, "devops": 3150, "lead": 2000,
+# planning text moved to lead.md, by 260 for the one-task rule (noSpec), by 430 for the docs worker (docs, unchanged),
+# and by 140 for the implementer pair in status and Gemini 4 Carbon's takeover after the review rounds.
+BUDGET = {"orchestrator": 16250, "implementer": 2700, "reviewer": 2080, "devops": 3150, "lead": 2000,
           "docs": 2000}
 with patch.object(t3_hooks, "REFERENCES", Path("references")):  # Where the copy is installed is not the docs' length.
     FIXED_CONTEXT = {"orchestrator": t3_hooks.orchestrator_context("codex")}  # The longer of the two runtimes' contexts.

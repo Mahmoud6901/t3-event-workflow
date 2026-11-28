@@ -25,11 +25,15 @@ Only a model with an ability card in `assets/cards.json` is approved. The card s
 good and weak at in coding-agent work, from independent boards where they exist and from its maker
 otherwise, with the date its sources were read. Every approved model but Fable 5.2 can implement;
 Astra, Opus, Sonnet, Neon and Gemini 4 Carbon can review; Sonnet, Opus and Neon can run DevOps; Fable
-5.2 and Opus can lead; Neon, Sonnet and Opus can write the docs. The default models are Opus 5.5 for
-implementers at `xhigh` effort, GPT-6.2 Astra for reviewers at `xhigh`, Sonnet 5.5 for DevOps at `high`,
-Fable 5.2 for the lead at `high`, and Gemini 4 Neon for the docs worker at `high`. You can choose each
-role's model, its effort, or both, at setup or later: any model your T3 runs, at any effort T3 offers
-for it. Setup checks which models your T3 can run, and asks you to pick one for any role it cannot start.
+5.2 and Opus can lead; Gemini 4 Carbon, Neon, Sonnet and Opus can write the docs. By default, Opus 5.5
+and Gemini 4 Neon take turns as the implementers, at `xhigh` effort: each new implementer runs on the
+one that holds fewer unfinished tasks, so tasks that start together are split between them, and tasks
+that run one after another alternate. When one of them cannot start, the other takes its turn. The
+other defaults are GPT-6.2 Astra for reviewers at `xhigh`, Sonnet 5.5 for DevOps at `high`, Fable 5.2
+for the lead at `high`, and Gemini 4 Carbon for the docs worker at `high`. You can choose each role's
+model, its effort, or both, at setup or later: any model your T3 runs, at any effort T3 offers for it.
+A model you choose for the implementer replaces the pair. Setup checks which models your T3 can run,
+and asks you to pick one for any role it cannot start.
 
 A model can have more than one route. Opus 5.5 runs through Claude, then Antigravity, then goose on
 OpenRouter; Sonnet 5.5 through Claude, then Antigravity; Astra through Codex, then goose; Neon through
@@ -37,7 +41,16 @@ Antigravity, then goose. A worker starts on the first route T3 runs that has cap
 effort that route offers at or below the one asked for, and its start line names the route when it is
 not the first. Goose routes, and the models that run only on goose, are paid per token. They are offered
 only while no subscription route of an approved model for the role has capacity, and the start line
-then says so. A model you pick runs as you picked it.
+then says so. One goose model is chosen paid on purpose: Gemini 4 Carbon. As the docs worker's default
+it runs whenever T3 runs it and it has capacity, and the start line says it is paid through OpenRouter.
+When it cannot start, another docs model stands in. A model you pick runs as you picked it.
+
+When a reviewer asks for changes on an implementer's task 3 times, the workflow gives the task to a new
+implementer on Gemini 4 Carbon, through goose and paid per token. It is the best-scored model that runs
+only on goose, and its card fits hard fixes. You are told which model it replaces. This happens once per
+task, and only while you have not chosen the implementer's model and Carbon can start. If the task comes
+back 3 more times, or Carbon cannot start, or it is a docs task, you are asked: carry on with its
+implementer, restart it with a new one on another model, or drop it.
 
 Each role runs on your choice or the default. While that model has no route with capacity, Jev picks a
 stand-in among the role's models with capacity. For each option it reads the card, the model's record
@@ -45,7 +58,8 @@ in your projects, its [LiveBench 2.0](https://livebench.ai/) scores and whether 
 paid. It sizes the change from the task, fits the strengths and weaknesses to it, and lets the record
 outweigh scores and claims once it holds several tasks of that size. Without Jev's answer (no key, Jev
 unreachable, an invalid reply, or a model it was not offered), the best-scored option stands in. New
-workers go back to your model or the default when the limit resets. Jev never sets an effort.
+workers go back to your model or the default when the limit resets. For the implementer, Jev stands
+in only while neither Opus nor Neon can start. Jev never sets an effort.
 
 A reviewer is never of the same family as the model that wrote its PR. The family is the model's maker,
 whichever provider runs it: Anthropic for Claude, OpenAI for GPT, Google for Gemini. When the reviewer's

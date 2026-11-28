@@ -29,7 +29,7 @@
     "devopsEffort": "high",
     "lead": "claude-fable-5-2",
     "leadEffort": "high",
-    "docs": "gemini-4-neon",
+    "docs": "google/gemini-4-carbon",
     "docsEffort": "high"
   },
   "jev": {

@@ -54,7 +54,7 @@ MODELS = {
     "gemini-4-argon": {"provider": ANTIGRAVITY, "roles": ["implementer"]},
     "gemini-4-hydrogen": {"provider": ANTIGRAVITY, "roles": ["implementer"]},
     "claude-fable-5-2": {"provider": "claudeAgent", "roles": ["lead"]},
-    "google/gemini-4-carbon": {"provider": GOOSE, "roles": ["implementer", "reviewer"]},
+    "google/gemini-4-carbon": {"provider": GOOSE, "roles": ["implementer", "reviewer", "docs"]},
     "deepseek/deepseek-v4.1-flash": {"provider": GOOSE, "roles": ["implementer"]},
     "z-ai/glm-5.3-prime": {"provider": GOOSE, "roles": ["implementer"]},
     "moonshotai/kimi-k3.1-pro": {"provider": GOOSE, "roles": ["implementer"]},
@@ -62,11 +62,17 @@ MODELS = {
 }
 DEFAULTS = {"implementer": "claude-opus-5-5", "implementerEffort": "xhigh",
             "reviewer": "gpt-6.2-astra", "reviewerEffort": "xhigh", "devops": "claude-sonnet-5-5", "devopsEffort": "high",
-            "lead": "claude-fable-5-2", "leadEffort": "high", "docs": "gemini-4-neon", "docsEffort": "high"}
-SHIPPED = {"reviewer": "claude-opus-5-5"}  # Defaults an earlier version shipped, which a binding it made still stores.
+            "lead": "claude-fable-5-2", "leadEffort": "high", "docs": "google/gemini-4-carbon", "docsEffort": "high"}
+# The implementers that share the tasks while the user has no model of their own for the role: each new one runs on
+# the one holding fewer unfinished tasks. The first is the implementer's default in the binding.
+PAIR = ("claude-opus-5-5", "gemini-4-neon")
+SHIPPED = {"reviewer": "claude-opus-5-5", "docs": "gemini-4-neon"}  # Defaults an earlier version shipped, which a binding it made still stores.
 QUIET_MINUTES = 30
 NUDGES = 1  # Follow-ups asking a worker that ended without its closing command to finish; then the task is blocked.
-REVIEW_ROUNDS = 3  # Reviews asking for changes before the user decides how the task goes on.
+REVIEW_ROUNDS = 3  # Reviews asking for changes before a new implementer takes over, or the user decides how it goes on.
+# The goose model that takes an implementer's task over after its review rounds, and the docs worker's default: the
+# best scored model that runs through goose alone, with a card fit for hard fixes. It is paid per token.
+TAKEOVER = "google/gemini-4-carbon"
 ROUND_OPTIONS = ["carry on", "restart", "drop"]
 OPEN = ("waiting", "ready", "implementing", "review_needed", "reviewing", "approved", "asking", "confirmed",
         "merging", "ci_failed", "pipeline_wait", "blocked")
@@ -135,13 +141,16 @@ def routes(item, model):
 def options(config, role, lists, spent):
     """What a new worker in the role may start on now: {model: the route it starts on}, for each approved model of the
     role that has one, in the order config lists them. A model starts on its first route that T3 runs and that has
-    capacity. A paid route counts only while no subscription route of the role's approved models has capacity."""
+    capacity. A paid route counts only while no subscription route of the role's approved models has capacity, or when
+    the role's default has no subscription route at all: that default was chosen paid."""
     free = {m: [r for r in routes(item, m) if runs(lists, r["model"], r["provider"]) is not False
                 and not at_limit(spent or {}, r["model"], r["provider"])]
             for m, item in config["models"].items() if role in item.get("roles", [])}
     paid = not any(not r["paid"] for found in free.values() for r in found)
-    return {m: next(r for r in found if paid or not r["paid"]) for m, found in free.items()
-            if any(paid or not r["paid"] for r in found)}
+    default = (config.get("defaults") or {}).get(role)
+    chosen = default in config["models"] and all(r["paid"] for r in routes(config["models"][default], default))
+    return {m: next(r for r in found if paid or not r["paid"] or (chosen and m == default)) for m, found in free.items()
+            if any(paid or not r["paid"] or (chosen and m == default) for r in found)}
 
 
 def can_run(config, model, lists):
@@ -420,6 +429,27 @@ def usual(config, state, role):
     return model, (config["models"].get(model) or {}).get("provider")
 
 
+def in_turns(state, role):
+    """Whether a new worker in the role runs on one of the pair: an implementer, while the user has no model for it."""
+    return role == "implementer" and not ((state.get("picks") or {}).get(role) or {}).get("model")
+
+
+def turn(state, found):
+    """The one of the pair a new implementer runs on: of those among the options found (both when neither is), the one
+    holding fewer unfinished tasks; on a tie, the one that did not start the last implementer of the pair; else the
+    first. So tasks that start together are split, and tasks that run one after another alternate."""
+    held, last = dict.fromkeys(PAIR, 0), None
+    for worker in sorted(state["workers"].values(), key=lambda w: int(w["id"][1:])):
+        if worker["role"] != "implementer" or worker["model"] not in PAIR:
+            continue
+        last = worker["model"]
+        task = state["tasks"].get(worker["task"]) or {}
+        if worker["state"] != "cancelled" and task.get("implementer") == worker["id"] and task.get("state") not in FINISHED:
+            held[worker["model"]] += 1
+    able = [m for m in PAIR if m in found] or list(PAIR)
+    return min(able, key=lambda m: (held[m], m == last, PAIR.index(m)))
+
+
 def described(task):
     """What Jev is told about a task."""
     return {"request": task["task"], "brief": task["brief"], "plan": task["plan"]}
@@ -527,9 +557,11 @@ def update_fix(config, outcome, number):
 
 def role_model(config, state, role):
     """What a new worker in this role starts on: the user's model and effort where set, else the defaults. Jev stands in
-    for a model that is at its usage limit. Jev sets no effort."""
+    for a model that is at its usage limit. Jev sets no effort. An implementer the user left open runs on the pair in
+    turns, so it shows both ("models")."""
     pick = (state.get("picks") or {}).get(role) or {}
-    return {"model": pick.get("model") or config["defaults"][role],
+    model = {"models": list(PAIR)} if in_turns(state, role) else {"model": pick.get("model") or config["defaults"][role]}
+    return {**model,
             "modelSource": "pick" if pick.get("model") else "default",
             "effort": pick.get("effort") or config["defaults"][role + "Effort"],
             "effortSource": "pick" if pick.get("effort") else "default"}
@@ -764,6 +796,9 @@ class Flow:
         models = {"models": approved()}
         defaults = {role: {"model": DEFAULTS[role], "effort": DEFAULTS[role + "Effort"],
                            "runs": can_run(models, DEFAULTS[role], lists)} for role in ROLES}
+        found = [can_run(models, m, lists) for m in PAIR]  # The implementer's default is the pair, taking turns.
+        defaults["implementer"] = {"models": list(PAIR), "effort": DEFAULTS["implementerEffort"],
+                                   "runs": None if lists is None else any(found)}
         if lists is None:
             return {"known": False, "defaults": defaults,
                     "reason": "T3's model lists are not on this computer, so nothing can be checked or picked."}
@@ -1498,16 +1533,25 @@ class Flow:
         state["tell"].append(f"{task['task']} ({task['plan']}) stopped after {REVIEW_ROUNDS} review rounds: each asked "
                              f"for changes.")
 
-    def take_over(self, config, state, task, advice):
+    def take_over(self, config, state, task, advice, who="the user"):
         """A new implementer takes the task after its review rounds, told why its PR came back. The author of a
         pipeline fix is its plan's DevOps worker, which stays."""
         old = state["workers"].get(task.get("implementer"))
         if old and old["role"] in AUTHORS:
             self.retire(state, old, "replaced after its review rounds")
         task.pop("fix", None)
-        task["returned"] = (f"The reviewer asked for changes on PR #{task['pr']} {REVIEW_ROUNDS} times, and the user gave "
+        task["returned"] = (f"The reviewer asked for changes on PR #{task['pr']} {REVIEW_ROUNDS} times, and {who} gave "
                             f"the task to a new {NAMES.get(maker(task), maker(task))}.")
         self.start_implementer(config, state, task, advice)
+
+    def carbon_takes_over(self, config, state, task, author):
+        """The reviewer asked for changes REVIEW_ROUNDS times on an implementer's task the user left open: once per task,
+        the workflow itself gives it to a new implementer on TAKEOVER, paid through OpenRouter, and the count starts
+        again. The next REVIEW_ROUNDS ask the user as before."""
+        task["rounds"], task["takenOver"] = 0, TAKEOVER
+        self.take_over(config, state, task, {"implementer": TAKEOVER, "source": "rounds"}, who="the workflow")
+        state["tell"].append(f"{task['task']} ({task['plan']}) came back from review {REVIEW_ROUNDS} times, so {TAKEOVER} "
+                             f"takes it over from {author['model']}, paid through OpenRouter.")
 
     def other_model(self, config, state, task):
         """Advice for the new implementer (or docs worker) that takes a task after its review rounds. Where the user left
@@ -1684,12 +1728,15 @@ class Flow:
         lists, spent = t3_lists()[0], limits_now(state)
         found = options(config, role, lists, spent)
         own, provider = usual(config, state, role)
+        if in_turns(state, role):  # The one of the pair whose turn it is, or the other while it cannot start.
+            own = turn(state, found)
+            provider = config["models"][own]["provider"]
         advised = choice.get(role) if role in (config["models"].get(choice.get(role)) or {}).get("roles", []) else None
         standing = None  # The model a stand-in stands in for.
         if advised and (choice.get("limit") or not pick.get("model")):
             model, source, standing = advised, "limit" if choice.get("limit") else choice.get("source", "jev"), choice.get("limit")
         else:  # The user's pick, else the default, unless it cannot start now.
-            model, source = own, "pick" if pick.get("model") else "default"
+            model, source = own, "pick" if pick.get("model") else "turn" if in_turns(state, role) else "default"
             out = at_limit(spent, own, provider) if pick.get("model") else own not in found
             best = next(iter(jev.ranked([m for m in found if m != own])), None) if out else None
             if best:
@@ -1726,6 +1773,8 @@ class Flow:
         model, provider = usual(config, state, role)
         picked = bool(((state.get("picks") or {}).get(role) or {}).get("model"))
         found = options(config, role, lists, spent)
+        if in_turns(state, role):  # Out only when neither of the pair can start; it stands in for the one whose turn it is.
+            model = turn(state, found)
         out = at_limit(spent, model, provider) if picked else model not in found
         if not out:
             return {}
@@ -2167,6 +2216,9 @@ class Flow:
         require(head == sha, f"PR #{task['pr']} moved to {head[:12]} after the commit you reviewed; end your turn")
         if verdict == "approve":
             gh.approve(sha, f"Approved by the t3 workflow reviewer ({worker['model']})")
+        lists, spent = t3_lists()[0], limits_now(state)
+        carbon = any(runs(lists, r["model"], r["provider"]) and not at_limit(spent, r["model"], r["provider"])
+                     for r in routes(config["models"].get(TAKEOVER) or {}, TAKEOVER))
 
         def change(config, state):
             task = state["tasks"][worker["task"]]
@@ -2179,7 +2231,12 @@ class Flow:
                 self.move(task, "approved", f"t3/review on {sha[:12]}")
             else:
                 task["rounds"] = task.get("rounds", 0) + 1
-                if task["rounds"] >= REVIEW_ROUNDS:
+                author = state["workers"].get(task.get("implementer")) or {}
+                if task["rounds"] >= REVIEW_ROUNDS and carbon and maker(task) == "implementer" \
+                        and author.get("role") == "implementer" and author.get("model") != TAKEOVER \
+                        and not task.get("takenOver") and in_turns(state, "implementer"):
+                    self.carbon_takes_over(config, state, task, author)
+                elif task["rounds"] >= REVIEW_ROUNDS:
                     self.ask_rounds(state, task)
                 else:
                     task["fix"] = review_fix(task)
@@ -2766,10 +2823,11 @@ def worker_label(state, worker):
     return f"{worker['id']}, the {role} of " + (f"{task['task']} ({task['plan']})" if task else f"plan {worker['plan']}"), task
 
 
-WHY_MODEL = {"pick": "your choice", "default": "the default", "jev": "Jev's choice",
+WHY_MODEL = {"pick": "your choice", "default": "the default", "jev": "Jev's choice", "turn": "taking turns with",
              "fallback": "the fallback, as Jev gave no answer",  # A worker an earlier version prepared.
              "scores": "the best-scored model that could start, as Jev gave no answer"}
 PAID = "paid through OpenRouter, as the subscription models are at their limits"
+FIXED_PAID = "paid through OpenRouter"  # A goose model chosen for the work itself, not for a limit.
 
 
 def started_line(state, worker):
@@ -2783,10 +2841,17 @@ def started_line(state, worker):
     why = WHY_MODEL.get(worker.get("modelSource"))
     if worker.get("modelSource") == "limit":
         why = f"a stand-in for {worker.get('standsInFor') or 'a model at its usage limit'}"
+    if worker.get("modelSource") == "turn":
+        why = f"{why} {next((m for m in PAIR if m != worker['model']), '')}".strip()
     if worker.get("modelSource") == "family":
         why = f"a different family than the {worker['otherRole']}'s {worker['otherThan']}"
+    if worker.get("modelSource") == "rounds":
+        why = f"it takes over after {REVIEW_ROUNDS} review rounds"
     if worker.get("paid") and worker.get("modelSource") != "pick":
-        why = f"{why}; {PAID}" if why else PAID
+        # A goose model chosen as it is (the takeover, or a default with no subscription route) is paid by choice.
+        fixed = worker.get("modelSource") == "rounds" or (worker.get("modelSource") == "default" and all(
+            r["paid"] for r in routes(MODELS.get(worker["model"]) or {}, worker["model"])))
+        why = f"{why}; {FIXED_PAID if fixed else PAID}" if why else FIXED_PAID if fixed else PAID
     model = worker["model"] + (f" through {worker['via']}" if worker.get("via") else "")
     return f"{role} for {what} started on {model} at {worker['effort']}" + (f" ({why})." if why else ".")
 

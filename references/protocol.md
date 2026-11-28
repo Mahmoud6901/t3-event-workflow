@@ -17,7 +17,7 @@ The orchestrator runs `t3-workflow '<JSON>'` from its shell; its hook adds the p
 | answer | `{"op":"answer","ask":"a7","answer":"merge"}` | `task` or `spec`, `state` |
 | restart | `{"op":"restart","task":"Fix the login typo","authorization":"<the user's words>"}` | `task` or `spec`, `state` |
 | control | `{"op":"control","action":"activate","authorization":"<the user's words>"}` | `control` |
-| status | `{"op":"status"}` | plans with `dependsOn`, tasks with `after`, specs, each role's model, guarded paths, working workers, open asks, problems |
+| status | `{"op":"status"}` | plans with `dependsOn`, tasks with `after`, specs, each role's model (`models`: the implementer pair in turns), guarded paths, working workers, open asks, problems |
 | setup_github | `{"op":"setup_github","authorization":"<the user's words>"}` | `repo`, `changed` |
 | models | `{"op":"models","search":"qwen"}` | `providers`, `defaults` (each with `runs`), `models` (each with `provider`, `efforts`) |
 | pick | `{"op":"pick","role":"reviewer","model":"…","effort":"xhigh","authorization":"<the user's words>"}` | `model`, `effort`, each with its source |
@@ -98,7 +98,8 @@ The hook runs `ended` for each "Delegated task …" notice; you never do.
 
 A review asking for changes, a conflict, a failed CI check in the task's code, or your `back` sends
 the task back to its implementer, with a follow-up naming the fix. A task's third review asking for
-changes, counted from your last answer, asks you instead.
+changes, counted from your last answer, asks you. Once per task, with no implementer pick and Gemini 4
+Carbon able to start, a new implementer on Carbon (paid) takes it over instead, and `tell` says so.
 
 **A worker that ends without its closing command** gets one follow-up asking it to finish. If it ends
 that way again, its task is `blocked`, and `tell` says so. One stopped at its quota is replaced at

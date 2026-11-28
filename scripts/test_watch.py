@@ -140,7 +140,12 @@ class WatchTests(unittest.TestCase):
         self.assertEqual(self.repair(41), ([self.worker], [PROJECT]))
         (fresh,) = self.op("next")["calls"]
         self.assertEqual(fresh["tool"], "delegate_task", "its run stopped at a quota: no follow-up")
-        self.assertEqual(fresh["arguments"]["target"], self.target, "the account's limit reset long ago: no stand-in")
+        self.assertIn(fresh["arguments"]["target"]["model"], flow.PAIR, "the account's limit reset long ago: no stand-in")
+        engine = flow.Flow(self.db)
+        try:
+            self.assertFalse(engine.load(PROJECT)[1].get("limits"), "a reset already past is not learned")
+        finally:
+            engine.close()
 
     def test_a_late_end_next_already_acted_on_wakes_nobody(self):
         self.ended(30)
