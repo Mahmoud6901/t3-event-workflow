@@ -46,6 +46,8 @@ PAID_LIST = [{"slug": s, "name": s, "capabilities": {"optionDescriptors": [
     {"id": "provider"}, {"id": "thinking_effort", "options": levels("off", "low", "medium", "high", "max")}]}}
              for s in ("anthropic/claude-opus-5.5", "openai/gpt-6.2-astra", "google/gemini-4-neon", "google/gemini-4-carbon",
                        "qwen/qwen4-max")]
+PAID_LIST.append({"slug": "moonshotai/kimi-k3.1-pro", "name": "moonshotai/kimi-k3.1-pro",
+                  "capabilities": {"optionDescriptors": [{"id": "provider"}, {"id": "mode"}]}})  # It takes no effort.
 CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultrathink"]
 CLAUDE_LIST = [{"slug": s, "capabilities": {"optionDescriptors": [{"id": "effort", "options": levels(*CLAUDE_EFFORTS)}]}}
                for s in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")]
@@ -1824,57 +1826,9 @@ class FlowTests(unittest.TestCase):
         self.assertNotEqual(fresh["worker"], call["worker"])
         self.assertEqual(fresh["arguments"]["target"]["model"], "gpt-6.2-sol")
 
-    def taken_over(self, **binding):
-        """A task whose third review asked for changes while T3 runs Gemini 4 Carbon through goose: it is taken over.
-        Returns (the old implementer's call, the new one's call)."""
-        call, review, tree = self.to_review(**binding)
-        self.rounds(call, review, tree, 3)
-        cancel, fresh = self.start()  # The old implementer's run had not ended here, so it is cancelled.
-        self.assertEqual((cancel["tool"], cancel["worker"]), ("task_cancel", call["worker"]))
-        return call, fresh
-
-    def test_after_three_review_rounds_gemini_4_carbon_takes_the_task_over_without_asking(self):
+    def test_three_review_rounds_ask_you_while_t3_runs_the_paid_models_too(self):
         self.t3_caches(goose=GOOSE_LIST + PAID_LIST)
-        call, fresh = self.taken_over()
-        self.assertEqual(call["arguments"]["target"]["model"], "claude-opus-5-5")
-        self.assertEqual(self.last_step["ask"], [])
-        self.assertIn("Fix the login typo (M30) came back from review 3 times, so google/gemini-4-carbon takes it over from "
-                      "claude-opus-5-5, paid through OpenRouter.", self.last_step["tell"])
-        self.assertEqual(fresh["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose", "model": "google/gemini-4-carbon",
-                                                        "options": {"provider": "openrouter", "thinking_effort": "high"}})
-        self.assertEqual(self.last_done["tell"], ["Implementer for Fix the login typo (M30) started on google/gemini-4-carbon "
-                                                  "at high (it takes over after 3 review rounds; paid through OpenRouter)."])
-        self.assertEqual(getattr(self, "jev_asked", 0), 0)
-        brief = fresh["arguments"]["task"]
-        self.assertIn("PR #7 already holds this task's work", brief)
-        self.assertIn("It came back because: The reviewer asked for changes on PR #7 3 times", brief)
-        self.assertNotIn("the user gave", brief)
-        self.assertEqual([t["state"] for t in self.status()["tasks"]], ["implementing"])
-
-    def test_a_task_carbon_took_over_is_reviewed_by_another_family_and_three_more_returns_ask_you(self):
-        self.t3_caches(goose=GOOSE_LIST + PAID_LIST, antigravity=ANTIGRAVITY_LIST)
-        _, fresh = self.taken_over(picks={"reviewer": "gemini-4-neon"})
-        worker, token, tree = self.implement(fresh, "export const name = 'carbon';\n", 7)
-        self.assertTrue(self.worker("pr", worker, token, "--pr", "7", path=tree)["ok"])
-        (review,) = self.start()
-        self.assertNotEqual(flow.family(review["arguments"]["target"]["model"]), "Google", "not Carbon's own family")
-        self.rounds(fresh, review, tree, 3)
-        step = self.orchestrator("next")
-        self.assertEqual(step["calls"], [], "a second takeover is not made")
-        (ask,) = step["ask"]
-        self.assertEqual(ask["options"], ["carry on", "restart", "drop"])
-        self.jev_answer = {}
-        self.assertTrue(self.orchestrator("answer", ask=ask["id"], answer="restart")["ok"])
-        (again,) = [c for c in self.start() if c["tool"] == "delegate_task"]
-        self.assertNotEqual(again["arguments"]["target"]["model"], "google/gemini-4-carbon", "restart runs on another model")
-
-    def test_without_carbon_able_to_start_or_with_the_users_implementer_three_returns_ask_you_as_before(self):
-        for case, caches, binding in (("goose spent", {"usage": {"acpRegistry_goose": SPENT}}, {}),
-                                      ("no Carbon", {}, {}), ("a pick", {}, {"picks": {"implementer": "gpt-6.2-sol"}})):
-            with self.subTest(case):
-                self.setUp()
-                self.t3_caches(goose=GOOSE_LIST + (PAID_LIST if case != "no Carbon" else []), **caches)
-                self.rounds_ask(**binding)
+        self.rounds_ask()  # No model takes the task over by itself: only your answer moves it on.
 
     def test_after_three_review_rounds_drop_ends_the_task(self):
         _, _, ask = self.rounds_ask()
@@ -2590,12 +2544,12 @@ class FlowTests(unittest.TestCase):
         finally:
             db.close()
 
-    def test_a_plan_whose_work_merged_gets_a_docs_task_on_carbon_and_is_done_only_after_it(self):
+    def test_a_plan_whose_work_merged_gets_a_docs_task_on_kimi_and_is_done_only_after_it(self):
         (docs,) = self.to_docs()
         self.assertEqual(self.hub.merged, [7])
         self.assertIn("Merged PR #7: Fix the login typo (M30).", self.last_step["tell"])
         self.assertFalse([line for line in self.last_step["tell"] if line.startswith("Plan M30 done")])
-        self.assertEqual(self.last_done["tell"], ["Docs worker for plan M30 started on google/gemini-4-carbon at high "
+        self.assertEqual(self.last_done["tell"], ["Docs worker for plan M30 started on moonshotai/kimi-k3.1-pro at high "
                                                   "(the default; paid through OpenRouter)."])
         arguments = docs["arguments"]
         self.assertEqual((arguments["role"], arguments["isolation"]), ("implementation", "worktree"))
@@ -2617,39 +2571,39 @@ class FlowTests(unittest.TestCase):
         self.assertEqual([(t["task"], t["state"]) for t in self.status()["tasks"]],
                          [("Fix the login typo", "merged"), ("Update the docs of M30", "unchanged")])
 
-    def test_the_docs_worker_runs_on_gemini_4_carbon_paid_through_openrouter_while_subscriptions_have_capacity(self):
+    def test_the_docs_worker_runs_on_kimi_k3_1_pro_paid_through_openrouter_while_subscriptions_have_capacity(self):
         self.t3_caches(goose=GOOSE_LIST + PAID_LIST, antigravity=ANTIGRAVITY_LIST)
         self.assertEqual(self.orchestrator("models")["defaults"]["docs"],
-                         {"model": "google/gemini-4-carbon", "effort": "high", "runs": True})
+                         {"model": "moonshotai/kimi-k3.1-pro", "effort": "high", "runs": True})
         (docs,) = self.to_docs()
-        self.assertEqual(docs["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose", "model": "google/gemini-4-carbon",
-                                                       "options": {"provider": "openrouter", "thinking_effort": "high"}})
-        self.assertEqual(self.last_done["tell"], ["Docs worker for plan M30 started on google/gemini-4-carbon at high "
+        self.assertEqual(docs["arguments"]["target"], {"providerInstanceId": "acpRegistry_goose", "model": "moonshotai/kimi-k3.1-pro",
+                                                       "options": {"provider": "openrouter"}})
+        self.assertEqual(self.last_done["tell"], ["Docs worker for plan M30 started on moonshotai/kimi-k3.1-pro at high "
                                                   "(the default; paid through OpenRouter)."])
         self.assertEqual(getattr(self, "jev_asked", 0), 0)
 
-    def test_without_goose_another_docs_model_stands_in_for_carbon_and_setup_is_not_refused(self):
+    def test_without_goose_another_docs_model_stands_in_for_kimi_and_setup_is_not_refused(self):
         self.t3_caches(goose=None, antigravity=ANTIGRAVITY_LIST)
         self.assertFalse(self.orchestrator("models")["defaults"]["docs"]["runs"])
         self.jev_answer = {}
         (docs,) = self.to_docs()
         self.assertEqual(docs["arguments"]["target"]["model"], "gemini-4-neon", "the best scored docs model T3 runs")
         self.assertEqual(self.last_done["tell"], ["Docs worker for plan M30 started on gemini-4-neon at high "
-                                                  "(a stand-in for google/gemini-4-carbon)."])
+                                                  "(a stand-in for moonshotai/kimi-k3.1-pro)."])
         self.assertFalse([line for line in self.last_step["tell"] if "usage limit" in line], self.last_step["tell"])
         self.assertTrue(self.orchestrator("pick", role="docs", model="claude-sonnet-5-5",
                                           authorization="Sonnet writes the docs.")["ok"])
         back = self.orchestrator("pick", role="docs", model="default", authorization="Back to the default.")
         self.assertTrue(back["ok"], back)
-        self.assertEqual(back["model"], "google/gemini-4-carbon")
+        self.assertEqual(back["model"], "moonshotai/kimi-k3.1-pro")
 
-    def test_an_older_bindings_docs_default_moves_from_neon_to_carbon_once_t3_runs_it(self):
+    def test_an_older_bindings_docs_default_moves_from_neon_to_kimi_once_t3_runs_it(self):
         self.t3_caches(antigravity=ANTIGRAVITY_LIST)
         self.bind(docs=True)
         self.stored_defaults(docs="gemini-4-neon")
-        self.assertEqual(self.status()["models"]["docs"]["model"], "gemini-4-neon", "T3 does not run Carbon yet")
+        self.assertEqual(self.status()["models"]["docs"]["model"], "gemini-4-neon", "T3 does not run Kimi yet")
         self.t3_caches(goose=GOOSE_LIST + PAID_LIST, antigravity=ANTIGRAVITY_LIST)
-        self.assertEqual(self.status()["models"]["docs"]["model"], "google/gemini-4-carbon")
+        self.assertEqual(self.status()["models"]["docs"]["model"], "moonshotai/kimi-k3.1-pro")
 
     def test_a_docs_pr_merges_like_a_task_and_later_work_on_the_plan_gets_its_own_docs_task(self):
         (docs,) = self.to_docs()
@@ -2666,7 +2620,7 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.hub.merged, [7, 8])
         self.assertIn("Plan M30 done: 2 merged.", self.last_step["tell"])
         self.assertEqual(record.lines(self.db.parent / "record.sqlite3", "docs"),
-                         {"google/gemini-4-carbon": "small: 1 task, 1 approved first time, 0.0 review rounds on average"})
+                         {"moonshotai/kimi-k3.1-pro": "small: 1 task, 1 approved first time, 0.0 review rounds on average"})
         self.assertTrue(self.orchestrator("queue_edit", plan="M30", tasks=[{"task": "Add a footer", "brief": "Add it."}])["ok"])
         (call,) = self.start()
         w, t, tree = self.implement(call, "export const footer = 1;\n", 9)
@@ -2679,10 +2633,10 @@ class FlowTests(unittest.TestCase):
         self.assertIn("#9 Add a footer", again["arguments"]["task"])
         self.assertNotIn("#7", again["arguments"]["task"], "only the work no docs task covered")
 
-    def test_a_docs_task_that_comes_back_three_times_asks_you_and_is_not_taken_over(self):
+    def test_a_docs_task_that_comes_back_three_times_asks_you(self):
         self.t3_caches(goose=GOOSE_LIST + PAID_LIST)
         (docs,) = self.to_docs()
-        self.assertEqual(docs["arguments"]["target"]["model"], "google/gemini-4-carbon")
+        self.assertEqual(docs["arguments"]["target"]["model"], "moonshotai/kimi-k3.1-pro")
         worker, token, tree = self.work(docs, {"README.md": "# App\nUsers sign in by name.\n"})
         for round_ in range(1, 4):
             self.hub.open(8, f"t3/{worker}", ["README.md"])
@@ -2697,10 +2651,9 @@ class FlowTests(unittest.TestCase):
                 git(tree, "commit", "-am", f"round {round_}")
                 git(tree, "push")
         step = self.orchestrator("next")
-        self.assertEqual(step["calls"], [], "the docs worker is on that model already: no takeover")
+        self.assertEqual(step["calls"], [], "the third round does not go back to the docs worker")
         (ask,) = step["ask"]
         self.assertEqual(ask["options"], ["carry on", "restart", "drop"])
-        self.assertFalse([line for line in step["tell"] if "takes it over" in line], step["tell"])
 
     def test_a_plan_whose_only_merged_work_is_a_pipeline_fix_gets_no_docs_task(self):
         self.bind(docs=True)

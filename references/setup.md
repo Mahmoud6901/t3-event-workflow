@@ -42,7 +42,7 @@ step 1:
   ask for a model, an effort, both, or a skip. When `runs` is false, this T3 cannot run the default, so
   the user picks a model; `init` refuses the reviewer and DevOps without one. The implementer, the lead
   and the docs worker start on another approved model T3 runs (the lead on Opus 5.5; the docs worker on
-  a subscription model when goose cannot run Gemini 4 Carbon).
+  a subscription model when goose cannot run Kimi K3.1 Pro).
 - Search with the user's words and show the matches with their `provider`; `more` counts the ones not
   shown. Offer only a model the list returned.
 - Offer the efforts in the chosen model's `efforts` (none when it is empty). Without a chosen model,
@@ -53,7 +53,7 @@ step 1:
   maker: Anthropic, OpenAI, Google) runs instead on the best-scored approved reviewer of another family.
 - A model runs on its first route with capacity (Opus: Claude, Antigravity, then goose). Paid goose
   routes are offered only while no subscription route has capacity, except for a default that runs only
-  on goose: the docs worker's Gemini 4 Carbon, paid through OpenRouter. While a model has no route with
+  on goose: the docs worker's Kimi K3.1 Pro, paid through OpenRouter. While a model has no route with
   capacity (T3 shows it spent, or a run stopped at its quota), Jev starts that role's new workers on an
   approved model with capacity, over the user's choice too, until the limit resets. It reads the ability
   cards, the record and the task's size. Without its answer, the best-scored one starts.
@@ -107,7 +107,7 @@ In Codex's PowerShell, pipe a here-string instead, and keep the JSON ASCII (writ
 | `requiredChecks` | The CI check names that must pass before a merge |
 | `checks` | Local checks `worker pr` runs, each `{"name","argv","cwd","timeoutSeconds"}`. Give `argv` as a list, not shell text; `cwd` is relative to the project folder. |
 | `noChecksReason` | Why there are no local checks, when `checks` is empty |
-| `defaults` | Models and efforts without the user's choice: implementer Opus 5.5 at `xhigh` (taking turns with Gemini 4 Neon), reviewer GPT-6.2 Astra at `xhigh`, DevOps Sonnet 5.5 at `high`, lead Fable 5.2 at `high`, docs worker Gemini 4 Carbon at `high`. The implementer's model is always the shipped one; the user's own is a pick. |
+| `defaults` | Models and efforts without the user's choice: implementer Opus 5.5 at `xhigh` (taking turns with Gemini 4 Neon), reviewer GPT-6.2 Astra at `xhigh`, DevOps Sonnet 5.5 at `high`, lead Fable 5.2 at `high`, docs worker Kimi K3.1 Pro at `high`. The implementer's model is always the shipped one; the user's own is a pick. |
 | `quietMinutes` | Minutes before a quiet worker is replaced (default 30) |
 | `picks` | The user's model and effort per role, from step 2 |
 | `devops` | `false` merges without a DevOps worker (default `true`), from step 2 |

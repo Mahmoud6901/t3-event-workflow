@@ -54,25 +54,23 @@ MODELS = {
     "gemini-4-argon": {"provider": ANTIGRAVITY, "roles": ["implementer"]},
     "gemini-4-hydrogen": {"provider": ANTIGRAVITY, "roles": ["implementer"]},
     "claude-fable-5-2": {"provider": "claudeAgent", "roles": ["lead"]},
-    "google/gemini-4-carbon": {"provider": GOOSE, "roles": ["implementer", "reviewer", "docs"]},
+    "google/gemini-4-carbon": {"provider": GOOSE, "roles": ["implementer", "reviewer"]},
     "deepseek/deepseek-v4.1-flash": {"provider": GOOSE, "roles": ["implementer"]},
     "z-ai/glm-5.3-prime": {"provider": GOOSE, "roles": ["implementer"]},
-    "moonshotai/kimi-k3.1-pro": {"provider": GOOSE, "roles": ["implementer"]},
+    "moonshotai/kimi-k3.1-pro": {"provider": GOOSE, "roles": ["implementer", "docs"]},
     "qwen/qwen4-max": {"provider": GOOSE, "roles": ["implementer"]},
 }
+# The docs worker's default runs through goose alone, so it is paid per token.
 DEFAULTS = {"implementer": "claude-opus-5-5", "implementerEffort": "xhigh",
             "reviewer": "gpt-6.2-astra", "reviewerEffort": "xhigh", "devops": "claude-sonnet-5-5", "devopsEffort": "high",
-            "lead": "claude-fable-5-2", "leadEffort": "high", "docs": "google/gemini-4-carbon", "docsEffort": "high"}
+            "lead": "claude-fable-5-2", "leadEffort": "high", "docs": "moonshotai/kimi-k3.1-pro", "docsEffort": "high"}
 # The implementers that share the tasks while the user has no model of their own for the role: each new one runs on
 # the one holding fewer unfinished tasks. The first is the implementer's default in the binding.
 PAIR = ("claude-opus-5-5", "gemini-4-neon")
 SHIPPED = {"reviewer": "claude-opus-5-5", "docs": "gemini-4-neon"}  # Defaults an earlier version shipped, which a binding it made still stores.
 QUIET_MINUTES = 30
 NUDGES = 1  # Follow-ups asking a worker that ended without its closing command to finish; then the task is blocked.
-REVIEW_ROUNDS = 3  # Reviews asking for changes before a new implementer takes over, or the user decides how it goes on.
-# The goose model that takes an implementer's task over after its review rounds, and the docs worker's default: the
-# best scored model that runs through goose alone, with a card fit for hard fixes. It is paid per token.
-TAKEOVER = "google/gemini-4-carbon"
+REVIEW_ROUNDS = 3  # Reviews asking for changes before the user decides how the task goes on.
 ROUND_OPTIONS = ["carry on", "restart", "drop"]
 OPEN = ("waiting", "ready", "implementing", "review_needed", "reviewing", "approved", "asking", "confirmed",
         "merging", "ci_failed", "pipeline_wait", "blocked")
@@ -1533,25 +1531,16 @@ class Flow:
         state["tell"].append(f"{task['task']} ({task['plan']}) stopped after {REVIEW_ROUNDS} review rounds: each asked "
                              f"for changes.")
 
-    def take_over(self, config, state, task, advice, who="the user"):
+    def take_over(self, config, state, task, advice):
         """A new implementer takes the task after its review rounds, told why its PR came back. The author of a
         pipeline fix is its plan's DevOps worker, which stays."""
         old = state["workers"].get(task.get("implementer"))
         if old and old["role"] in AUTHORS:
             self.retire(state, old, "replaced after its review rounds")
         task.pop("fix", None)
-        task["returned"] = (f"The reviewer asked for changes on PR #{task['pr']} {REVIEW_ROUNDS} times, and {who} gave "
+        task["returned"] = (f"The reviewer asked for changes on PR #{task['pr']} {REVIEW_ROUNDS} times, and the user gave "
                             f"the task to a new {NAMES.get(maker(task), maker(task))}.")
         self.start_implementer(config, state, task, advice)
-
-    def carbon_takes_over(self, config, state, task, author):
-        """The reviewer asked for changes REVIEW_ROUNDS times on an implementer's task the user left open: once per task,
-        the workflow itself gives it to a new implementer on TAKEOVER, paid through OpenRouter, and the count starts
-        again. The next REVIEW_ROUNDS ask the user as before."""
-        task["rounds"], task["takenOver"] = 0, TAKEOVER
-        self.take_over(config, state, task, {"implementer": TAKEOVER, "source": "rounds"}, who="the workflow")
-        state["tell"].append(f"{task['task']} ({task['plan']}) came back from review {REVIEW_ROUNDS} times, so {TAKEOVER} "
-                             f"takes it over from {author['model']}, paid through OpenRouter.")
 
     def other_model(self, config, state, task):
         """Advice for the new implementer (or docs worker) that takes a task after its review rounds. Where the user left
@@ -2216,9 +2205,6 @@ class Flow:
         require(head == sha, f"PR #{task['pr']} moved to {head[:12]} after the commit you reviewed; end your turn")
         if verdict == "approve":
             gh.approve(sha, f"Approved by the t3 workflow reviewer ({worker['model']})")
-        lists, spent = t3_lists()[0], limits_now(state)
-        carbon = any(runs(lists, r["model"], r["provider"]) and not at_limit(spent, r["model"], r["provider"])
-                     for r in routes(config["models"].get(TAKEOVER) or {}, TAKEOVER))
 
         def change(config, state):
             task = state["tasks"][worker["task"]]
@@ -2231,12 +2217,7 @@ class Flow:
                 self.move(task, "approved", f"t3/review on {sha[:12]}")
             else:
                 task["rounds"] = task.get("rounds", 0) + 1
-                author = state["workers"].get(task.get("implementer")) or {}
-                if task["rounds"] >= REVIEW_ROUNDS and carbon and maker(task) == "implementer" \
-                        and author.get("role") == "implementer" and author.get("model") != TAKEOVER \
-                        and not task.get("takenOver") and in_turns(state, "implementer"):
-                    self.carbon_takes_over(config, state, task, author)
-                elif task["rounds"] >= REVIEW_ROUNDS:
+                if task["rounds"] >= REVIEW_ROUNDS:
                     self.ask_rounds(state, task)
                 else:
                     task["fix"] = review_fix(task)
@@ -2827,7 +2808,7 @@ WHY_MODEL = {"pick": "your choice", "default": "the default", "jev": "Jev's choi
              "fallback": "the fallback, as Jev gave no answer",  # A worker an earlier version prepared.
              "scores": "the best-scored model that could start, as Jev gave no answer"}
 PAID = "paid through OpenRouter, as the subscription models are at their limits"
-FIXED_PAID = "paid through OpenRouter"  # A goose model chosen for the work itself, not for a limit.
+FIXED_PAID = "paid through OpenRouter"  # A goose model that is the role's default, not a stand-in at a limit.
 
 
 def started_line(state, worker):
@@ -2845,12 +2826,10 @@ def started_line(state, worker):
         why = f"{why} {next((m for m in PAIR if m != worker['model']), '')}".strip()
     if worker.get("modelSource") == "family":
         why = f"a different family than the {worker['otherRole']}'s {worker['otherThan']}"
-    if worker.get("modelSource") == "rounds":
-        why = f"it takes over after {REVIEW_ROUNDS} review rounds"
     if worker.get("paid") and worker.get("modelSource") != "pick":
-        # A goose model chosen as it is (the takeover, or a default with no subscription route) is paid by choice.
-        fixed = worker.get("modelSource") == "rounds" or (worker.get("modelSource") == "default" and all(
-            r["paid"] for r in routes(MODELS.get(worker["model"]) or {}, worker["model"])))
+        # A default with no subscription route (the docs worker's) is paid by choice.
+        fixed = worker.get("modelSource") == "default" and all(
+            r["paid"] for r in routes(MODELS.get(worker["model"]) or {}, worker["model"]))
         why = f"{why}; {FIXED_PAID if fixed else PAID}" if why else FIXED_PAID if fixed else PAID
     model = worker["model"] + (f" through {worker['via']}" if worker.get("via") else "")
     return f"{role} for {what} started on {model} at {worker['effort']}" + (f" ({why})." if why else ".")

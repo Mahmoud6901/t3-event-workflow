@@ -98,8 +98,7 @@ The hook runs `ended` for each "Delegated task …" notice; you never do.
 
 A review asking for changes, a conflict, a failed CI check in the task's code, or your `back` sends
 the task back to its implementer, with a follow-up naming the fix. A task's third review asking for
-changes, counted from your last answer, asks you. Once per task, with no implementer pick and Gemini 4
-Carbon able to start, a new implementer on Carbon (paid) takes it over instead, and `tell` says so.
+changes, counted from your last answer, asks you instead.
 
 **A worker that ends without its closing command** gets one follow-up asking it to finish. If it ends
 that way again, its task is `blocked`, and `tell` says so. One stopped at its quota is replaced at
